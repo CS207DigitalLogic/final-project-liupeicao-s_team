@@ -16,17 +16,19 @@ module tb_top;
     reg rst_n;
     reg PC_Uart_rxd;      // DUT 接收引脚
     wire PC_Uart_txd;     // DUT 发送引脚
-    wire done;            // DUT 完成信号
+    // wire done;            // DUT 完成信号
 
     // --- 调试信号 (连接到 top 模块的调试输出) ---
-    wire [4:0]  debug_top_state;
-    wire [15:0] debug_parser_number_out;
-    wire        debug_parser_number_valid;
-    wire [3:0]  debug_alu_state;
-    wire [2:0]  debug_alu_i;
-    wire [2:0]  debug_alu_j;
-    wire [15:0] debug_mem_rd_data_c_val;
-    wire        debug_mem_read_c_req;
+    // 使用跨模块引用替代已被移除的端口
+    wire [4:0]  debug_top_state = u_top.state;
+    wire [15:0] debug_parser_number_out = u_top.number_out;
+    wire        debug_parser_number_valid = u_top.number_valid;
+    wire [3:0]  debug_alu_state = u_top.u_matrix_alu.state;
+    wire [2:0]  debug_alu_i = u_top.u_matrix_alu.i;
+    wire [2:0]  debug_alu_j = u_top.u_matrix_alu.j;
+    wire [15:0] debug_mem_rd_data_c_val = u_top.user_rd_data;
+    wire        debug_mem_read_c_req = (u_top.user_slot_idx == u_top.SLOT_C);
+    wire        done = (u_top.state == u_top.ST_DONE_STATE);
 
     // --- DUT 额外 IO 端口 (连接到常量或未连接) ---
     wire [15:0] dummy_led_pin;
@@ -46,7 +48,7 @@ module tb_top;
         .sys_rst_n  (rst_n),
         .PC_Uart_rxd(PC_Uart_rxd),
         .PC_Uart_txd(PC_Uart_txd),
-        .done       (done),
+        // .done       (done), // Removed
         
         // --- 连接开发板 IO 端口 ---
         .led_pin        (dummy_led_pin),
@@ -55,17 +57,17 @@ module tb_top;
         .dip_pin        (dummy_dip_pin),
         .seg_cs_pin     (dummy_seg_cs_pin),
         .seg_data_0_pin (dummy_seg_data_0_pin),
-        .seg_data_1_pin (dummy_seg_data_1_pin),
+        .seg_data_1_pin (dummy_seg_data_1_pin)
 
-        // --- 连接调试输出到 tb_top 的 wire ---
-        .debug_top_state         (debug_top_state),
-        .debug_parser_number_out (debug_parser_number_out),
-        .debug_parser_number_valid (debug_parser_number_valid),
-        .debug_alu_state         (debug_alu_state),
-        .debug_alu_i             (debug_alu_i),
-        .debug_alu_j             (debug_alu_j),
-        .debug_mem_rd_data_c_val (debug_mem_rd_data_c_val),
-        .debug_mem_read_c_req    (debug_mem_read_c_req)
+        // --- 调试端口已移除 ---
+        // .debug_top_state         (debug_top_state),
+        // .debug_parser_number_out (debug_parser_number_out),
+        // .debug_parser_number_valid (debug_parser_number_valid),
+        // .debug_alu_state         (debug_alu_state),
+        // .debug_alu_i             (debug_alu_i),
+        // .debug_alu_j             (debug_alu_j),
+        // .debug_mem_rd_data_c_val (debug_mem_rd_data_c_val),
+        // .debug_mem_read_c_req    (debug_mem_read_c_req)
     );
 
     // ============================================================

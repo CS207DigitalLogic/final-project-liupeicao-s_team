@@ -241,6 +241,7 @@ module top (
     reg [3:0] digit_buf[0:4];  // [0]最低位 -> [4]最高位
     reg [2:0] digit_cnt;       // 剩余要发送的数字个数
     reg [2:0] send_digit_idx;  // 当前发送的 digit_buf 下标
+    reg [2:0] calc_cnt;        // 新增：BCD转换计数器
     reg [15:0] result_data_buffer;
     reg        is_negative;
     reg signed [15:0] temp_data_signed;
@@ -296,6 +297,7 @@ module top (
             temp_data_signed   <= 16'sd0;
             digit_cnt          <= 3'd0;
             send_digit_idx     <= 3'd0;
+            calc_cnt           <= 3'd0;
 
             for (i_int = 0; i_int < 5; i_int = i_int + 1)
                 digit_buf[i_int] <= 4'd0;
@@ -492,6 +494,15 @@ module top (
                 ST_LATCH_RESULT: begin
                     result_data_buffer <= user_rd_data;
                     state              <= ST_ASCII_CALC_DIGITS;
+                    calc_cnt           <= 3'd0; // 初始化计数器
+                    
+                    // 预先处理符号位
+                    is_negative        <= user_rd_data[15];
+                    if (user_rd_data[15])
+                         temp_data_signed <= -$signed(user_rd_data);
+                    else
+                         temp_data_signed <= $signed(user_rd_data);
+
                 `ifdef SIM_DEBUG_TOP
                     $display("[%0t] [TOP_C_READ] C[%0d][%0d] = %0d (0x%h)",
                              $time, send_row, send_col,
@@ -500,59 +511,51 @@ module top (
                 end
 
                 // ------------------------------------------------
-                // 计算 digit_buf / digit_cnt
+                // 计算 digit_buf / digit_cnt (重构为多周期)
                 // ------------------------------------------------
                 ST_ASCII_CALC_DIGITS: begin
-                    is_negative      <= result_data_buffer[15];
-                    temp_data_signed =  $signed(result_data_buffer);
-                    if (result_data_buffer[15])
-                        temp_data_signed = -temp_data_signed;
-
-                    // 拆位
-                    digit_buf[0] = temp_data_signed % 10;
-                    temp_data_signed = temp_data_signed / 10;
-                    digit_buf[1] = temp_data_signed % 10;
-                    temp_data_signed = temp_data_signed / 10;
-                    digit_buf[2] = temp_data_signed % 10;
-                    temp_data_signed = temp_data_signed / 10;
-                    digit_buf[3] = temp_data_signed % 10;
-                    temp_data_signed = temp_data_signed / 10;
-                    digit_buf[4] = temp_data_signed % 10;
-
-                    // 计算最高有效位 & 初始化
-                    if (result_data_buffer == 16'd0) begin
-                        digit_cnt      <= 3'd1;
-                        send_digit_idx <= 3'd0;
-                    end else if (digit_buf[4] != 0) begin
-                        digit_cnt      <= 3'd5;
-                        send_digit_idx <= 3'd4;
-                    end else if (digit_buf[3] != 0) begin
-                        digit_cnt      <= 3'd4;
-                        send_digit_idx <= 3'd3;
-                    end else if (digit_buf[2] != 0) begin
-                        digit_cnt      <= 3'd3;
-                        send_digit_idx <= 3'd2;
-                    end else if (digit_buf[1] != 0) begin
-                        digit_cnt      <= 3'd2;
-                        send_digit_idx <= 3'd1;
+                    if (calc_cnt < 5) begin
+                        // 每个周期计算一位
+                        digit_buf[calc_cnt] <= temp_data_signed % 10;
+                        temp_data_signed    <= temp_data_signed / 10;
+                        calc_cnt            <= calc_cnt + 1'b1;
                     end else begin
-                        digit_cnt      <= 3'd1;
-                        send_digit_idx <= 3'd0;
+                        // 计算完成，确定有效位数
+                        if (result_data_buffer == 16'd0) begin
+                            digit_cnt      <= 3'd1;
+                            send_digit_idx <= 3'd0;
+                        end else if (digit_buf[4] != 0) begin
+                            digit_cnt      <= 3'd5;
+                            send_digit_idx <= 3'd4;
+                        end else if (digit_buf[3] != 0) begin
+                            digit_cnt      <= 3'd4;
+                            send_digit_idx <= 3'd3;
+                        end else if (digit_buf[2] != 0) begin
+                            digit_cnt      <= 3'd3;
+                            send_digit_idx <= 3'd2;
+                        end else if (digit_buf[1] != 0) begin
+                            digit_cnt      <= 3'd2;
+                            send_digit_idx <= 3'd1;
+                        end else begin
+                            digit_cnt      <= 3'd1;
+                            send_digit_idx <= 3'd0;
+                        end
+                        state <= ST_PREP_ASCII;
                     end
 
                 `ifdef SIM_DEBUG_TOP
-                    $display("[%0t] [TOP_ASCII_CALC] val=%0d (0x%h), is_neg=%0d, "
-                             "digits[4..0]=%0d %0d %0d %0d %0d, "
-                             "init_digit_cnt=%0d, init_send_idx=%0d",
-                             $time,
-                             $signed(result_data_buffer), result_data_buffer,
-                             is_negative,
-                             digit_buf[4], digit_buf[3], digit_buf[2],
-                             digit_buf[1], digit_buf[0],
-                             digit_cnt, send_digit_idx);
+                    if (calc_cnt == 5) begin
+                        $display("[%0t] [TOP_ASCII_CALC] val=%0d (0x%h), is_neg=%0d, "
+                                 "digits[4..0]=%0d %0d %0d %0d %0d, "
+                                 "init_digit_cnt=%0d, init_send_idx=%0d",
+                                 $time,
+                                 $signed(result_data_buffer), result_data_buffer,
+                                 is_negative,
+                                 digit_buf[4], digit_buf[3], digit_buf[2],
+                                 digit_buf[1], digit_buf[0],
+                                 digit_cnt, send_digit_idx); // 注意：这里打印的 cnt/idx 还是上一拍的值，实际上在下一拍生效
+                    end
                 `endif
-
-                    state <= ST_PREP_ASCII;
                 end
 
                 // ------------------------------------------------

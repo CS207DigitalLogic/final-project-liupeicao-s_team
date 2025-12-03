@@ -22,6 +22,20 @@ module uart_rx #(
     reg [15:0] clk_cnt;
     reg [2:0]  bit_idx;
     reg [7:0]  rx_shift;
+    
+    // Synchronizer for RX
+    reg rx_sync1, rx_sync2;
+    wire rx_stable = rx_sync2;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            rx_sync1 <= 1'b1;
+            rx_sync2 <= 1'b1;
+        end else begin
+            rx_sync1 <= rx;
+            rx_sync2 <= rx_sync1;
+        end
+    end
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -38,7 +52,7 @@ module uart_rx #(
                 ST_IDLE: begin
                     clk_cnt <= 0;
                     bit_idx <= 0;
-                    if (rx == 1'b0) begin
+                    if (rx_stable == 1'b0) begin
                         // 检测到起始位下降
                         state   <= ST_START;
                         clk_cnt <= 0;
@@ -48,7 +62,7 @@ module uart_rx #(
                 ST_START: begin
                     if (clk_cnt == (BIT_TIME/2)) begin
                         // 在起始位中间再确认一次
-                        if (rx == 1'b0) begin
+                        if (rx_stable == 1'b0) begin
                             clk_cnt <= 0;
                             bit_idx <= 0;
                             state   <= ST_DATA;
@@ -64,7 +78,7 @@ module uart_rx #(
                 ST_DATA: begin
                     if (clk_cnt == BIT_TIME - 1) begin
                         clk_cnt      <= 0;
-                        rx_shift[bit_idx] <= rx; // LSB 先行
+                        rx_shift[bit_idx] <= rx_stable; // LSB 先行
                         if (bit_idx == 3'd7) begin
                             bit_idx <= 0;
                             state   <= ST_STOP;
