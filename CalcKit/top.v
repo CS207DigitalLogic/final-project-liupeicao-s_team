@@ -214,6 +214,7 @@ module top (
     
     bonus_conv u_conv (
         .clk(clk), .rst_n(rst_n), .start_conv(conv_start),
+        .tx_ready(!tx_busy), // Handshake: Wait if UART is busy
         .mem_rd_slot(conv_rd_slot), .mem_rd_row(conv_rd_row), .mem_rd_col(conv_rd_col),
         .mem_rd_data(mux_user_rd_data), // Reads from User Port
         .conv_res_data(conv_res_data), .conv_res_valid(conv_res_valid), .conv_done(bonus_done),

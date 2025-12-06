@@ -51,6 +51,7 @@ module Seg_Driver (
     localparam CHAR_T = 8'h87; // 't' used for Transpose (T)
     localparam CHAR_J = 8'hE1; // 'J' (approx)
     localparam CHAR_t = 8'h87; // 't'
+    localparam CHAR_F = 8'h8E; // 'F'
     localparam CHAR_BLANK = 8'hFF;
     localparam CHAR_MINUS = 8'hBF; // '-'
     localparam CHAR_y     = 8'h91; // 'y'
@@ -159,6 +160,23 @@ module Seg_Driver (
                         disp_data[0] = CHAR_J;
                     end
                 end
+                3'b101: begin // Config -> "ConF"
+                    disp_data[7] = CHAR_C; disp_data[6] = CHAR_o; disp_data[5] = CHAR_N; disp_data[4] = CHAR_F;
+                    // Show current config value? We need input for that. 
+                    // Seg_Driver doesn't have config_val input.
+                    // But we have 'time_left' input. In config mode (State 0), time_left is not active.
+                    // Wait, top.v connects 'time_left' from Timer_Unit.
+                    // Timer_Unit output time_left depends on 'start_timer'.
+                    // If timer not started, time_left is 0 or reset value.
+                    // To show the config value, we need to pass it to Seg_Driver.
+                    // Let's just show "ConF" for now to be safe, or "ConF 10" if we can.
+                    // Actually, user sets it blindly? No, usually want feedback.
+                    // For now, just "ConF" is better than "----".
+                    // If user enters number, parser works in top.v.
+                    // We can reuse 'in_count' or 'time_left' if we multiplex in top.v?
+                    // Too risky to change top.v interface now.
+                    // Just "ConF" is enough to show mode is active.
+                end
                 default: begin // "----"
                     disp_data[7] = CHAR_MINUS; disp_data[6] = CHAR_MINUS; disp_data[5] = CHAR_MINUS; disp_data[4] = CHAR_MINUS;
                 end
@@ -207,11 +225,9 @@ module Seg_Driver (
             endcase
 
             // 段选输出
-            // If Board is Common Cathode (Active High Segs):
-            // We need '1' to light up. 
-            // My CHAR_X codes are Active Low (0 to light).
-            // So we invert them. ~disp_data.
-            seg_out <= ~disp_data[scan_idx];
+            // Remove inversion ~disp_data[scan_idx]
+            // Assuming Common Anode (0=ON) and CHAR_x codes are Active Low (0=ON)
+            seg_out <= disp_data[scan_idx];
         end
     end
 
