@@ -150,6 +150,8 @@ module top (
         .alu_rd_data(alu_rd_data),
         .alu_current_m(alu_cur_m),
         .alu_current_n(alu_cur_n),
+        .user_current_m(print_m), // Hook up for dynamic printing
+        .user_current_n(print_n), // Hook up for dynamic printing
         
         .alu_wr_slot(alu_wr_slot),
         .alu_wr_row(alu_wr_row),
@@ -242,6 +244,7 @@ module top (
     Seg_Driver u_seg (
         .clk(clk), .rst_n(rst_n),
         .current_state(current_state), .time_left(time_left), .sw_mode(sw_pin[7:5]),
+        .in_count(in_count), // Pass input count
         .seg_out(seg_data_0_pin), .seg_an(seg_cs_pin)
     );
     assign seg_data_1_pin = 8'hFF; // Unused
@@ -319,11 +322,48 @@ module top (
             conv_start <= 0;
             tx_start <= 0; // UART TX Start Pulse
 
+            // --- Emergency Reset Logic ---
+            reg [3:0] reset_cnt;
+            reg [19:0] reset_timer;
+            
+            if (btn_c_re) begin
+                 reset_cnt <= reset_cnt + 1;
+                 reset_timer <= 0;
+            end else if (reset_timer < 20'd100_0000) begin // 10ms timeout for rapid press
+                 reset_timer <= reset_timer + 1;
+            end else begin
+                 reset_cnt <= 0;
+            end
+            
+            if (reset_cnt >= 8) begin
+                 // Trigger Soft Reset
+                 input_dim_done <= 0;
+                 input_data_done <= 0;
+                 gen_start <= 0;
+                 alu_start <= 0;
+                 conv_start <= 0;
+                 in_m <= 0; in_n <= 0; in_count <= 0;
+                 print_state <= P_IDLE;
+                 reset_cnt <= 0;
+                 // Force IDLE? FSM needs reset signal or specific input.
+                 // We can just clear variables which might unstuck the logic.
+            end
+            
+            // Clear in_m/in_n when returning to IDLE from INPUT or CALC
+            if (current_state == 0) begin
+                in_m <= 0;
+                in_n <= 0;
+            end
+
             case (current_state)
                 // -----------------------
                 // STATE: INPUT DIM
                 // -----------------------
                 1: begin // INPUT_DIM
+                    // Clear previous state when entering
+                    if (in_count != 0) in_count <= 0; 
+                    // Note: in_m/in_n are cleared in IDLE transition below logic
+                    
                     if (parser_valid) begin
                         if (in_m == 0) begin
                             in_m <= parser_num[2:0]; // First number: M
@@ -398,7 +438,8 @@ module top (
                 7: begin // CALC_SELECT_OP
                     // Handled by FSM transition on Btn_C
                     // We just latch opcode here
-                    alu_opcode <= sw_pin[2:0]; // Use SW[2:0] for Opcode
+                    // User requested moving Opcode to SW[4:2] to avoid conflict
+                    alu_opcode <= sw_pin[4:2]; 
                 end
                 
                 // -----------------------
@@ -521,8 +562,8 @@ module top (
                             // Assume 3x3 for simplicity OR read dim.
                             // For robustness, let's loop 3x3. 
                             // REAL IMPLEMENTATION SHOULD READ DIMS.
-                            if (print_col == 2) begin // Hardcoded 3 cols
-                                if (print_row == 2) begin // Hardcoded 3 rows
+                            if (print_col == print_n - 1) begin // Dynamic Cols
+                                if (print_row == print_m - 1) begin // Dynamic Rows
                                     print_state <= P_DONE;
                                 end else begin
                                     print_row <= print_row + 1;
