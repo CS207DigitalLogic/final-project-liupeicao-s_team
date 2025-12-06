@@ -89,6 +89,7 @@ module matrix_gen (
                         j <= 0;
                         if (i == latched_m - 1) begin
                             state <= S_DONE;
+                            done <= 1; // Assert done
                             $display("MatrixGen: Loop Done.");
                         end else begin
                             i <= i + 1;
@@ -99,6 +100,17 @@ module matrix_gen (
                 end
                 
                 S_DONE: begin
+                    // Stay done until start is removed or auto reset?
+                    // FSM in top.v transitions on done high. 
+                    // top.v resets start in IDLE.
+                    // So if start goes low, we go to IDLE.
+                    if (!start) begin
+                        done <= 0;
+                        state <= S_IDLE;
+                    end
+                end
+                
+            endcase                S_DONE: begin
                     done <= 1;
                     if (!start) state <= S_IDLE;
                 end

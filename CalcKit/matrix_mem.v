@@ -22,6 +22,9 @@ module matrix_mem (
     output wire [15:0] alu_rd_data,
     output wire [2:0] alu_current_m,
     output wire [2:0] alu_current_n,
+    // New: User Dims Output
+    output wire [2:0] user_current_m,
+    output wire [2:0] user_current_n,
 
     input wire [1:0]  alu_wr_slot,
     input wire [2:0]  alu_wr_row,
@@ -83,6 +86,9 @@ module matrix_mem (
     assign alu_current_m = dims_m[alu_rd_slot];
     assign alu_current_n = dims_n[alu_rd_slot];
     
+    // User Dims
+    assign user_current_m = dims_m[user_slot_idx];
+    assign user_current_n = dims_n[user_slot_idx];
 
     // 【新增】Asynchronous Read for User
     // 当 user_we 为 0 时，user_rd_data 输出当前地址的数据

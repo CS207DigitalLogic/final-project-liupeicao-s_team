@@ -125,13 +125,23 @@ module Seg_Driver (
     // 2. 动态扫描逻辑
     reg [19:0] scan_cnt; // 扫描分频
     reg [2:0]  scan_idx; // 当前扫描位 0-7
+    
+    // User reports "All 8s" -> Likely Segments Active High or Anode Active High inverted?
+    // If user sees 8s with my code (seg_an active low scan, seg_out active low char), 
+    // then 'FF' output (BLANK) is turning all ON.
+    // This implies Segment lines are Active High (Common Cathode).
+    // If so, we need to invert seg_out.
+    // Also, if Anodes are Active Low, we keep seg_an.
+    // Let's invert seg_out logic.
+    
+    reg [7:0] seg_out_inv;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             scan_cnt <= 0;
             scan_idx <= 0;
             seg_an   <= 8'hFF;
-            seg_out  <= 8'hFF;
+            seg_out  <= 8'h00; // Inverted BLANK (FF -> 00)
         end else begin
             // 刷新率控制: 100MHz / 2^17 ~= 762Hz (每位 ~100Hz)
             scan_cnt <= scan_cnt + 1;
@@ -153,7 +163,11 @@ module Seg_Driver (
             endcase
 
             // 段选输出
-            seg_out <= disp_data[scan_idx];
+            // If Board is Common Cathode (Active High Segs):
+            // We need '1' to light up. 
+            // My CHAR_X codes are Active Low (0 to light).
+            // So we invert them. ~disp_data.
+            seg_out <= ~disp_data[scan_idx];
         end
     end
 
