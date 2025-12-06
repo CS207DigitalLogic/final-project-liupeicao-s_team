@@ -174,9 +174,82 @@ module tb_top;
         $display("\n[Step 6] Confirm Matrices (Default A, B)");
         press_btn_c(); // -> CHECK -> EXEC -> DONE -> PRINT
         
-        // 7. Wait for Result Print
+        // Wait for Result Print
         #50000000; 
-        $display("\n[Step 7] Test Finished");
+        
+        // --- Test SUB (Subtraction) ---
+        $display("\n[Step 8] Testing SUB Operation");
+        // Re-enter CALC Mode (FSM returns to IDLE after DONE)
+        // Need to select CALC mode again?
+        // FSM IDLE -> CALC needs SW=011 & Btn_C
+        // SW is already 011. Just press Btn_C.
+        press_btn_c(); // -> CALC_SELECT_OP
+        
+        sw_pin[2:0] = 3'b001; // SUB
+        $display("[TB Info] Selecting SUB (001)");
+        press_btn_c(); // -> CALC_SELECT_MAT
+        press_btn_c(); // -> CHECK -> EXEC -> DONE
+        #50000000;
+
+        // --- Test MUL (Matrix Multiplication) ---
+        $display("\n[Step 9] Testing MUL Operation");
+        press_btn_c(); // IDLE -> CALC
+        sw_pin[2:0] = 3'b010; // MUL
+        $display("[TB Info] Selecting MUL (010)");
+        press_btn_c(); // -> CALC_SELECT_MAT
+        press_btn_c(); // -> CHECK -> EXEC -> DONE
+        #50000000;
+
+        // --- Test SCALAR (Scalar Multiplication) ---
+        $display("\n[Step 10] Testing SCALAR Operation (Scalar=2)");
+        press_btn_c(); // IDLE -> CALC
+        sw_pin[2:0] = 3'b011; // SCA
+        $display("[TB Info] Selecting SCA (011)");
+        press_btn_c(); // -> CALC_SELECT_MAT
+        
+        // Set Scalar Value on SW (Using full 8 bits or lower bits? FSM uses sw_pin directly)
+        // In FSM: alu_scalar <= {8'b0, sw_pin};
+        // We need to set Scalar BEFORE confirming MAT?
+        // FSM:
+        // 7: CALC_SELECT_OP -> latch opcode -> 8
+        // 8: CALC_SELECT_MAT -> latch scalar -> 9
+        // So we set scalar during state 8.
+        sw_pin = 8'd2; // Scalar = 2. Note: This overwrites SW[7:5] which controls Mode!
+                       // FSM logic: `alu_scalar <= {8'b0, sw_pin};`
+                       // BUT wait, if we change SW[7:5], does it affect state?
+                       // FSM state transitions depend on `sw` ONLY in IDLE.
+                       // Once in CALC_SELECT_MAT, `sw` is just data.
+                       // HOWEVER, `sw[7:5]` is wired to `sw` input of FSM module.
+                       // Inside FSM, does it use `sw` for anything else?
+                       // Only IDLE transitions.
+                       // So it is SAFE to change SW in CALC_SELECT_MAT.
+        
+        press_btn_c(); // -> CHECK -> EXEC -> DONE
+        
+        // Restore SW for next mode if needed (though we go to IDLE)
+        sw_pin[7:5] = 3'b011; 
+        #50000000;
+
+        // --- Test TRANSPOSE ---
+        $display("\n[Step 11] Testing TRANSPOSE Operation");
+        press_btn_c(); // IDLE -> CALC
+        sw_pin[2:0] = 3'b100; // TRA
+        $display("[TB Info] Selecting TRA (100)");
+        press_btn_c(); // -> CALC_SELECT_MAT
+        press_btn_c(); // -> CHECK -> EXEC -> DONE
+        #50000000;
+
+        // --- Test BONUS (Convolution) ---
+        $display("\n[Step 12] Testing BONUS (Convolution)");
+        // Need to go to IDLE first (already there)
+        // Set SW=100 (Bonus Mode)
+        sw_pin[7:5] = 3'b100;
+        press_btn_c(); // -> BONUS_RUN
+        
+        // Wait for completion (Bonus takes time)
+        #100000000;
+
+        $display("\n[Step 13] All Tests Finished");
         $finish;
     end
     

@@ -3,68 +3,68 @@
 module Timer_Unit(
     input clk,
     input rst_n,
-    input start_timer,      // 启动倒计时信号
-    output reg [3:0] time_left,  // 剩余时间（0-10）
-    output reg timer_done   // 倒计时完成信号
+    input start_timer,      // ��������ʱ�ź�
+    output reg [3:0] time_left,  // ʣ��ʱ�䣨0-10��
+    output reg timer_done   // ����ʱ����ź�
 );
 
-// 时钟频率定义（假设100MHz时钟）
+// ʱ��Ƶ�ʶ��壨����100MHzʱ�ӣ�
 parameter CLK_FREQ = 100_000_000;  // 100MHz
-parameter TIMER_SECONDS = 10;      // 10秒倒计时
+parameter TIMER_SECONDS = 10;      // 10�뵹��ʱ
 
-// 计算1秒需要的时钟周期数
+// ����1����Ҫ��ʱ��������
 localparam ONE_SECOND = CLK_FREQ;
 
-// 内部计数器
-reg [31:0] counter;        // 32位计数器，足够计数10秒
-reg [3:0] current_time;    // 当前剩余时间
+// �ڲ�������
+reg [31:0] counter;        // 32λ���������㹻����10��
+reg [3:0] current_time;    // ��ǰʣ��ʱ��
 
-// 状态定义
+// ״̬����
 localparam IDLE = 1'b0;
 localparam COUNTING = 1'b1;
 reg state;
 
-// 倒计时逻辑
+// ����ʱ�߼�
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-        // 复位初始化
+        // ��λ��ʼ��
         state <= IDLE;
         counter <= 32'b0;
-        current_time <= 4'd10;  // 从10开始倒计时
+        current_time <= 4'd10;  // ��10��ʼ����ʱ
         time_left <= 4'd10;
         timer_done <= 1'b0;
     end else begin
         case (state)
             IDLE: begin
-                // 空闲状态
+                // ����״̬
                 timer_done <= 1'b0;
                 if (start_timer) begin
-                    // 启动倒计时
+                    // ��������ʱ
                     state <= COUNTING;
                     counter <= 32'b0;
                     current_time <= 4'd10;
                     time_left <= 4'd10;
                 end else begin
-                    // 保持初始值
+                    // ���ֳ�ʼֵ
                     current_time <= 4'd10;
                     time_left <= 4'd10;
                 end
             end
             
             COUNTING: begin
-                // 倒计时进行中
+                // ����ʱ������
                 timer_done <= 1'b0;
                 
                 if (!start_timer) begin
-                    // 如果start_timer提前结束，回到空闲状态
+                    // ���start_timer��ǰ�������ص�����״̬
                     state <= IDLE;
                     current_time <= 4'd10;
                     time_left <= 4'd10;
                 end else begin
-                    // 更新计数器
+                    // ���¼�����
                     counter <= counter + 1;
                     
-                    // 每秒更新一次时间
+                    // ÿ�����һ��ʱ��
                     if (counter >= ONE_SECOND - 1) begin
                         counter <= 32'b0;
                         
@@ -73,16 +73,16 @@ always @(posedge clk or negedge rst_n) begin
                             time_left <= current_time - 1;
                         end
                         
-                        // 检查是否倒计时结束
+                        // ����Ƿ񵹼�ʱ����
                         if (current_time == 1) begin
-                            // 倒计时完成
+                            // ����ʱ���
                             state <= IDLE;
                             timer_done <= 1'b1;
                             current_time <= 4'd10;
                             time_left <= 4'd0;
                         end
                     end else begin
-                        // 保持当前时间显示
+                        // ���ֵ�ǰʱ����ʾ
                         time_left <= current_time;
                     end
                 end

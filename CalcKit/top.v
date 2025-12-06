@@ -242,6 +242,7 @@ module top (
     Seg_Driver u_seg (
         .clk(clk), .rst_n(rst_n),
         .current_state(current_state), .time_left(time_left), .sw_mode(sw_pin[7:5]),
+        .in_count(in_count), // Pass input count
         .seg_out(seg_data_0_pin), .seg_an(seg_cs_pin)
     );
     assign seg_data_1_pin = 8'hFF; // Unused

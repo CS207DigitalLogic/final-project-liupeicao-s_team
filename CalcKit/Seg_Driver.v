@@ -6,6 +6,7 @@ module Seg_Driver (
     input wire [3:0] current_state, // 来自 FSM 的状态
     input wire [3:0] time_left,     // 来自 Timer 的倒计时
     input wire [2:0] sw_mode,       // 开关模式 SW[7:5]
+    input wire [7:0] in_count,      // 当前输入计数
     
     output reg [7:0] seg_out,       // 段选 (CA/CC depending on board, assuming Active Low for now based on top.v 'FF' init)
     output reg [7:0] seg_an         // 位选 (Active Low)
@@ -88,6 +89,19 @@ module Seg_Driver (
             case (sw_mode)
                 3'b000: begin // Input Dim -> "InPut"
                     disp_data[7] = CHAR_I; disp_data[6] = CHAR_N; disp_data[5] = CHAR_P; disp_data[4] = CHAR_U; disp_data[3] = CHAR_t;
+                    // Show count on last 2 digits
+                    if (in_count > 0) begin
+                         case (in_count % 10)
+                             0: disp_data[0] = CHAR_0; 1: disp_data[0] = CHAR_1; 2: disp_data[0] = CHAR_2; 3: disp_data[0] = CHAR_3;
+                             4: disp_data[0] = CHAR_4; 5: disp_data[0] = CHAR_5; 6: disp_data[0] = CHAR_6; 7: disp_data[0] = CHAR_7;
+                             8: disp_data[0] = CHAR_8; 9: disp_data[0] = CHAR_9; default: disp_data[0] = CHAR_BLANK;
+                         endcase
+                         case ((in_count / 10) % 10)
+                             0: disp_data[1] = CHAR_0; 1: disp_data[1] = CHAR_1; 2: disp_data[1] = CHAR_2; 3: disp_data[1] = CHAR_3;
+                             4: disp_data[1] = CHAR_4; 5: disp_data[1] = CHAR_5; 6: disp_data[1] = CHAR_6; 7: disp_data[1] = CHAR_7;
+                             8: disp_data[1] = CHAR_8; 9: disp_data[1] = CHAR_9; default: disp_data[1] = CHAR_BLANK;
+                         endcase
+                    end
                 end
                 3'b001: begin // Gen Random -> "Gen"
                     disp_data[7] = CHAR_G; disp_data[6] = CHAR_E; disp_data[5] = CHAR_N;
