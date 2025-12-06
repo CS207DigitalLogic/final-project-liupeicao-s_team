@@ -1,0 +1,146 @@
+`timescale 1ns / 1ps
+
+module Seg_Driver (
+    input wire clk,
+    input wire rst_n,
+    input wire [3:0] current_state, // 来自 FSM 的状态
+    input wire [3:0] time_left,     // 来自 Timer 的倒计时
+    input wire [2:0] sw_mode,       // 开关模式 SW[7:5]
+    
+    output reg [7:0] seg_out,       // 段选 (CA/CC depending on board, assuming Active Low for now based on top.v 'FF' init)
+    output reg [7:0] seg_an         // 位选 (Active Low)
+);
+
+    // 状态定义 (参考 Central_FSM)
+    localparam STATE_IDLE           = 4'd0;
+    localparam STATE_CALC_ERROR     = 4'd12;
+    // 其他状态可根据需要显示不同内容
+
+    // 字符编码 (共阴/共阳需确认，这里假设低电平有效点亮段)
+    // . g f e d c b a
+    localparam CHAR_0 = 8'hC0; 
+    localparam CHAR_1 = 8'hF9;
+    localparam CHAR_2 = 8'hA4;
+    localparam CHAR_3 = 8'hB0;
+    localparam CHAR_4 = 8'h99;
+    localparam CHAR_5 = 8'h92;
+    localparam CHAR_6 = 8'h82;
+    localparam CHAR_7 = 8'hF8;
+    localparam CHAR_8 = 8'h80;
+    localparam CHAR_9 = 8'h90;
+    
+    localparam CHAR_A = 8'h88;
+    localparam CHAR_C = 8'hC6;
+    localparam CHAR_E = 8'h86;
+    localparam CHAR_G = 8'hC2; // 'G' like in Gen
+    localparam CHAR_H = 8'h89;
+    localparam CHAR_I = 8'hCF; // 'I'
+    localparam CHAR_L = 8'hC7;
+    localparam CHAR_N = 8'hC8; // 'n'
+    localparam CHAR_O = 8'hC0; // 'O' (0)
+    localparam CHAR_P = 8'h8C;
+    localparam CHAR_R = 8'hAF; // 'r'
+    localparam CHAR_S = 8'h92; // 'S' (5)
+    localparam CHAR_U = 8'hC1; // 'U'
+    localparam CHAR_b = 8'h83; // 'b' (Bonus)
+    localparam CHAR_d = 8'hA1; // 'd'
+    localparam CHAR_o = 8'hA3; // 'o'
+    localparam CHAR_t = 8'h87; // 't'
+    localparam CHAR_BLANK = 8'hFF;
+    localparam CHAR_MINUS = 8'hBF; // '-'
+
+    reg [7:0] disp_data [0:7]; // 8个数码管的显示内容
+
+    // 1. 根据状态解码显示内容
+    always @(*) begin
+        // 默认全灭
+        disp_data[7] = CHAR_BLANK; disp_data[6] = CHAR_BLANK; disp_data[5] = CHAR_BLANK; disp_data[4] = CHAR_BLANK;
+        disp_data[3] = CHAR_BLANK; disp_data[2] = CHAR_BLANK; disp_data[1] = CHAR_BLANK; disp_data[0] = CHAR_BLANK;
+
+        if (current_state == STATE_CALC_ERROR) begin
+            // 显示 "Err  XX" (XX为倒计时)
+            disp_data[7] = CHAR_E;
+            disp_data[6] = CHAR_R;
+            disp_data[5] = CHAR_R;
+            disp_data[4] = CHAR_BLANK;
+            // 倒计时数字
+            if (time_left >= 10) begin
+                disp_data[1] = CHAR_1;
+                disp_data[0] = CHAR_0;
+            end else begin
+                disp_data[1] = CHAR_BLANK;
+                case(time_left)
+                    0: disp_data[0] = CHAR_0;
+                    1: disp_data[0] = CHAR_1;
+                    2: disp_data[0] = CHAR_2;
+                    3: disp_data[0] = CHAR_3;
+                    4: disp_data[0] = CHAR_4;
+                    5: disp_data[0] = CHAR_5;
+                    6: disp_data[0] = CHAR_6;
+                    7: disp_data[0] = CHAR_7;
+                    8: disp_data[0] = CHAR_8;
+                    9: disp_data[0] = CHAR_9;
+                    default: disp_data[0] = CHAR_MINUS;
+                endcase
+            end
+        end else begin
+            // 根据模式开关显示
+            case (sw_mode)
+                3'b000: begin // Input Dim -> "InPut"
+                    disp_data[7] = CHAR_I; disp_data[6] = CHAR_N; disp_data[5] = CHAR_P; disp_data[4] = CHAR_U; disp_data[3] = CHAR_t;
+                end
+                3'b001: begin // Gen Random -> "Gen"
+                    disp_data[7] = CHAR_G; disp_data[6] = CHAR_E; disp_data[5] = CHAR_N;
+                end
+                3'b010: begin // Display -> "diSP"
+                    disp_data[7] = CHAR_d; disp_data[6] = CHAR_I; disp_data[5] = CHAR_S; disp_data[4] = CHAR_P;
+                end
+                3'b011: begin // Calc -> "CALC"
+                    disp_data[7] = CHAR_C; disp_data[6] = CHAR_A; disp_data[5] = CHAR_L; disp_data[4] = CHAR_C;
+                end
+                3'b100: begin // Bonus -> "bonUS"
+                    disp_data[7] = CHAR_b; disp_data[6] = CHAR_o; disp_data[5] = CHAR_N; disp_data[4] = CHAR_U; disp_data[3] = CHAR_S;
+                end
+                default: begin // "----"
+                    disp_data[7] = CHAR_MINUS; disp_data[6] = CHAR_MINUS; disp_data[5] = CHAR_MINUS; disp_data[4] = CHAR_MINUS;
+                end
+            endcase
+        end
+    end
+
+    // 2. 动态扫描逻辑
+    reg [19:0] scan_cnt; // 扫描分频
+    reg [2:0]  scan_idx; // 当前扫描位 0-7
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            scan_cnt <= 0;
+            scan_idx <= 0;
+            seg_an   <= 8'hFF;
+            seg_out  <= 8'hFF;
+        end else begin
+            // 刷新率控制: 100MHz / 2^17 ~= 762Hz (每位 ~100Hz)
+            scan_cnt <= scan_cnt + 1;
+            if (scan_cnt[16]) begin 
+                scan_cnt <= 0;
+                scan_idx <= scan_idx + 1;
+            end
+
+            // 位选输出 (Active Low)
+            case (scan_idx)
+                3'd0: seg_an <= 8'b1111_1110;
+                3'd1: seg_an <= 8'b1111_1101;
+                3'd2: seg_an <= 8'b1111_1011;
+                3'd3: seg_an <= 8'b1111_0111;
+                3'd4: seg_an <= 8'b1110_1111;
+                3'd5: seg_an <= 8'b1101_1111;
+                3'd6: seg_an <= 8'b1011_1111;
+                3'd7: seg_an <= 8'b0111_1111;
+            endcase
+
+            // 段选输出
+            seg_out <= disp_data[scan_idx];
+        end
+    end
+
+endmodule
