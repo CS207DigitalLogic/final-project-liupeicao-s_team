@@ -210,12 +210,14 @@ module top (
     wire conv_res_valid;
     wire [1:0] conv_rd_slot;
     wire [2:0] conv_rd_row, conv_rd_col;
+    wire [31:0] bonus_cycles;
     
     bonus_conv u_conv (
         .clk(clk), .rst_n(rst_n), .start_conv(conv_start),
         .mem_rd_slot(conv_rd_slot), .mem_rd_row(conv_rd_row), .mem_rd_col(conv_rd_col),
         .mem_rd_data(mux_user_rd_data), // Reads from User Port
-        .conv_res_data(conv_res_data), .conv_res_valid(conv_res_valid), .conv_done(bonus_done)
+        .conv_res_data(conv_res_data), .conv_res_valid(conv_res_valid), .conv_done(bonus_done),
+        .total_cycles(bonus_cycles)
     );
 
     // --- Timer Unit ---
@@ -252,6 +254,7 @@ module top (
         .current_state(current_state), .time_left(time_left), .sw_mode(sw_pin[7:5]),
         .in_count(in_count), // Pass input count
         .alu_opcode(alu_opcode), // Pass Opcode
+        .bonus_cycles(bonus_cycles), // Pass Bonus Cycles
         .seg_out(seg_data_0_pin), .seg_an(seg_cs_pin)
     );
     assign seg_data_1_pin = 8'hFF; // Unused

@@ -14,7 +14,8 @@ module bonus_conv (
     // Output Interface
     output reg [15:0] conv_res_data,
     output reg        conv_res_valid, // Indicates valid data output
-    output reg        conv_done
+    output reg        conv_done,
+    output reg [31:0] total_cycles // Cycle count output
 );
 
     // =================================================================
@@ -54,6 +55,8 @@ module bonus_conv (
     
     reg signed [31:0] accumulator;
     reg [3:0] mac_cnt;      // 0 to 8
+    
+    reg [31:0] cycle_counter; // Internal counter
 
     // State Machine
     always @(posedge clk or negedge rst_n) begin
@@ -70,10 +73,19 @@ module bonus_conv (
             rom_x <= 0; rom_y <= 0;
             accumulator <= 0;
             mac_cnt <= 0;
+            cycle_counter <= 0;
+            total_cycles <= 0;
         end else begin
             // Default pulse resets
             conv_res_valid <= 0;
             conv_done <= 0;
+            
+            // Cycle Counting Logic
+            if (state != S_IDLE && state != S_DONE) begin
+                cycle_counter <= cycle_counter + 1;
+            end else if (state == S_IDLE && start_conv) begin
+                cycle_counter <= 0;
+            end
 
             case (state)
                 S_IDLE: begin
@@ -87,7 +99,7 @@ module bonus_conv (
                         mem_rd_col <= 0;
                     end
                 end
-
+                // ... (S_LOAD_KERNEL and others remain same until S_DONE) ...
                 S_LOAD_KERNEL: begin
                     kernel[kr][kc] <= mem_rd_data;
 
@@ -210,6 +222,7 @@ module bonus_conv (
 
                 S_DONE: begin
                     conv_done <= 1;
+                    total_cycles <= cycle_counter; // Latch final count
                     if (!start_conv) state <= S_IDLE;
                 end
             endcase

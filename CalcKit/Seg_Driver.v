@@ -8,6 +8,7 @@ module Seg_Driver (
     input wire [2:0] sw_mode,       // 开关模式 SW[7:5]
     input wire [7:0] in_count,      // 当前输入计数
     input wire [2:0] alu_opcode,    // 新增: ALU Opcode for display
+    input wire [31:0] bonus_cycles, // 新增: Bonus 周期数
     
     output reg [7:0] seg_out,       // 段选 (CA/CC depending on board, assuming Active Low for now based on top.v 'FF' init)
     output reg [7:0] seg_an         // 位选 (Active Low)
@@ -52,6 +53,7 @@ module Seg_Driver (
     localparam CHAR_t = 8'h87; // 't'
     localparam CHAR_BLANK = 8'hFF;
     localparam CHAR_MINUS = 8'hBF; // '-'
+    localparam CHAR_y     = 8'h91; // 'y'
 
     reg [7:0] disp_data [0:7]; // 8个数码管的显示内容
     
@@ -144,9 +146,18 @@ module Seg_Driver (
                     endcase
                 end
                 3'b100: begin // Bonus -> "bonUS" + J
-                    disp_data[7] = CHAR_b; disp_data[6] = CHAR_o; disp_data[5] = CHAR_N; disp_data[4] = CHAR_U; disp_data[3] = CHAR_S;
-                    // User Req: Conv J
-                    disp_data[0] = CHAR_J;
+                    if (bonus_cycles > 0) begin
+                        // Display "Cy" + count
+                        disp_data[7] = CHAR_C; disp_data[6] = CHAR_y; 
+                        disp_data[5] = CHAR_BLANK; disp_data[4] = CHAR_BLANK;
+                        disp_data[3] = (bonus_cycles >= 1000) ? get_char((bonus_cycles/1000)%10) : CHAR_BLANK;
+                        disp_data[2] = (bonus_cycles >= 100) ? get_char((bonus_cycles/100)%10) : CHAR_BLANK;
+                        disp_data[1] = (bonus_cycles >= 10) ? get_char((bonus_cycles/10)%10) : CHAR_BLANK;
+                        disp_data[0] = get_char(bonus_cycles%10);
+                    end else begin
+                        disp_data[7] = CHAR_b; disp_data[6] = CHAR_o; disp_data[5] = CHAR_N; disp_data[4] = CHAR_U; disp_data[3] = CHAR_S;
+                        disp_data[0] = CHAR_J;
+                    end
                 end
                 default: begin // "----"
                     disp_data[7] = CHAR_MINUS; disp_data[6] = CHAR_MINUS; disp_data[5] = CHAR_MINUS; disp_data[4] = CHAR_MINUS;
@@ -203,5 +214,16 @@ module Seg_Driver (
             seg_out <= ~disp_data[scan_idx];
         end
     end
+
+    function [7:0] get_char;
+        input [3:0] val;
+        begin
+            case(val)
+                0: get_char = CHAR_0; 1: get_char = CHAR_1; 2: get_char = CHAR_2; 3: get_char = CHAR_3;
+                4: get_char = CHAR_4; 5: get_char = CHAR_5; 6: get_char = CHAR_6; 7: get_char = CHAR_7;
+                8: get_char = CHAR_8; 9: get_char = CHAR_9; default: get_char = CHAR_BLANK;
+            endcase
+        end
+    endfunction
 
 endmodule
