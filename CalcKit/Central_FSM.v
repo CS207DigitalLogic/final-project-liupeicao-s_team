@@ -151,6 +151,13 @@ module Central_FSM (
                 // 倒计时结束，重新输入 (回到 SELECT_MAT)
                 if (error_timeout) 
                     next_state = STATE_CALC_SELECT_MAT;
+                // 支持倒计时内重新确认 (Early Retry)
+                // 如果用户在倒计时期间按下了确认键，我们认为他重新指定了矩阵
+                // 跳转回 CHECK 进行检查 (前提是 top.v 在 ERROR 状态下允许修改矩阵选择并产生 calc_mat_conf 信号)
+                // 但 calc_mat_conf 是 SELECT_MAT 状态产生的。
+                // 我们可以在 ERROR 状态下复用 calc_mat_conf 信号作为跳转条件。
+                else if (calc_mat_conf)
+                    next_state = STATE_CALC_CHECK;
             end
 
             default: next_state = STATE_IDLE;

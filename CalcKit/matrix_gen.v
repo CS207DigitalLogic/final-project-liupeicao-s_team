@@ -110,10 +110,6 @@ module matrix_gen (
                     end
                 end
                 
-            endcase                S_DONE: begin
-                    done <= 1;
-                    if (!start) state <= S_IDLE;
-                end
             endcase
         end
     end

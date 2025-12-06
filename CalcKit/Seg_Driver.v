@@ -7,6 +7,7 @@ module Seg_Driver (
     input wire [3:0] time_left,     // 来自 Timer 的倒计时
     input wire [2:0] sw_mode,       // 开关模式 SW[7:5]
     input wire [7:0] in_count,      // 当前输入计数
+    input wire [2:0] alu_opcode,    // 新增: ALU Opcode for display
     
     output reg [7:0] seg_out,       // 段选 (CA/CC depending on board, assuming Active Low for now based on top.v 'FF' init)
     output reg [7:0] seg_an         // 位选 (Active Low)
@@ -46,12 +47,23 @@ module Seg_Driver (
     localparam CHAR_b = 8'h83; // 'b' (Bonus)
     localparam CHAR_d = 8'hA1; // 'd'
     localparam CHAR_o = 8'hA3; // 'o'
+    localparam CHAR_T = 8'h87; // 't' used for Transpose (T)
+    localparam CHAR_J = 8'hE1; // 'J' (approx)
     localparam CHAR_t = 8'h87; // 't'
     localparam CHAR_BLANK = 8'hFF;
     localparam CHAR_MINUS = 8'hBF; // '-'
 
     reg [7:0] disp_data [0:7]; // 8个数码管的显示内容
-
+    
+    // Need Opcode input
+    // But interface only has sw_mode[2:0]
+    // Wait, top.v passes sw_pin[7:5] as sw_mode.
+    // But opcode is selected by sw_pin[4:2] in top.v logic.
+    // We need opcode passed to Seg_Driver to display T, A, B, C, J
+    // Or we can infer it from sw_mode if user uses sw[4:2] for opcode selection?
+    // But Seg_Driver only gets `sw_mode` (3 bits).
+    // We need to add `alu_opcode` input to Seg_Driver.
+    
     // 1. 根据状态解码显示内容
     always @(*) begin
         // 默认全灭
@@ -109,11 +121,32 @@ module Seg_Driver (
                 3'b010: begin // Display -> "diSP"
                     disp_data[7] = CHAR_d; disp_data[6] = CHAR_I; disp_data[5] = CHAR_S; disp_data[4] = CHAR_P;
                 end
-                3'b011: begin // Calc -> "CALC"
+                3'b011: begin // Calc -> "CALC" + Opcode
                     disp_data[7] = CHAR_C; disp_data[6] = CHAR_A; disp_data[5] = CHAR_L; disp_data[4] = CHAR_C;
+                    // Display Opcode char at digit 0
+                    // Opcode: 000(ADD), 001(SUB), 010(MUL), 011(SCA), 100(TRA)
+                    // User Req: T(Trans), A(Add), B(Scalar/Beta?), C(Mul?), J(Conv)
+                    // Mapping:
+                    // ADD (000) -> A
+                    // SUB (001) -> S (User didn't specify SUB char, assuming 'S' or maybe only ADD is required?)
+                    // MUL (010) -> C (User said Matrix Mul C)
+                    // SCA (011) -> B (User said Scalar Mul B)
+                    // TRA (100) -> T
+                    // CONV is Bonus mode (sw_mode=100), handled below.
+                    
+                    case (alu_opcode)
+                        3'b000: disp_data[0] = CHAR_A; // ADD
+                        3'b001: disp_data[0] = CHAR_S; // SUB (User didn't specify, using S)
+                        3'b010: disp_data[0] = CHAR_C; // MUL (User: C)
+                        3'b011: disp_data[0] = CHAR_b; // SCA (User: B) - Using 'b' for B
+                        3'b100: disp_data[0] = CHAR_T; // TRA (User: T)
+                        default: disp_data[0] = CHAR_BLANK;
+                    endcase
                 end
-                3'b100: begin // Bonus -> "bonUS"
+                3'b100: begin // Bonus -> "bonUS" + J
                     disp_data[7] = CHAR_b; disp_data[6] = CHAR_o; disp_data[5] = CHAR_N; disp_data[4] = CHAR_U; disp_data[3] = CHAR_S;
+                    // User Req: Conv J
+                    disp_data[0] = CHAR_J;
                 end
                 default: begin // "----"
                     disp_data[7] = CHAR_MINUS; disp_data[6] = CHAR_MINUS; disp_data[5] = CHAR_MINUS; disp_data[4] = CHAR_MINUS;
