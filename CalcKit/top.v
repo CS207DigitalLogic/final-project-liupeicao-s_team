@@ -396,14 +396,26 @@ module top (
                     // We need edge detection on state entry? 
                     // Or FSM waits for done.
                     // Let's trigger once.
-                    if (!gen_done && !gen_start) gen_start <= 1; 
+                    if (!gen_done && !gen_start) gen_start <= 1;
+                    else gen_start <= 0; // Pulse it!
                 end
                 
                 // -----------------------
                 // STATE: BONUS RUN
                 // -----------------------
                 4: begin // BONUS_RUN
+                    // Need to clear conv_start? No, it's a pulse in logic below.
+                    // Wait, logic below: if (!bonus_done && !conv_start) conv_start <= 1;
+                    // This latches conv_start high. 
+                    // bonus_conv.v starts on level 'start_conv'. 
+                    // But bonus_conv logic: if (start_conv) state <= S_LOAD_KERNEL. 
+                    // It will keep reloading if start stays high?
+                    // bonus_conv.v: if (start_conv) state <= S_LOAD_KERNEL. 
+                    // Yes, it restarts. We need a pulse.
+                    // Or ensure we only trigger once.
                     if (!bonus_done && !conv_start) conv_start <= 1;
+                    else conv_start <= 0; // Pulse it!
+                    
                     // Stream output logic handled below
                 end
                 
