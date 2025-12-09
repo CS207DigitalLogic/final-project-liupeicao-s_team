@@ -179,101 +179,39 @@ module top (
     reg [2:0] gen_target_m;
     reg [2:0] gen_target_n;
     reg [1:0] gen_target_slot;
-    reg [3:0] gen_state; // Expanded for input states
-    reg gen_two_flag; // 1 if generating 2 matrices
     
-    // Local State Machine for Gen
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            gen_state <= 0;
-            gen_random_done <= 0;
-            gen_start <= 0;
-            gen_target_slot <= 0;
-            gen_two_flag <= 0;
-            gen_target_m <= 3;
-            gen_target_n <= 3;
-        end else begin
-            gen_start <= 0;
-            gen_random_done <= 0;
-            
-            case (gen_state)
-                0: begin // IDLE: Wait for FSM State 3
-                    if (current_state == 3) begin
-                        // Reset params on entry
-                        gen_target_m <= 0; 
-                        gen_target_n <= 0;
-                        gen_two_flag <= 0;
-                        // Go to wait for inputs
-                        gen_state <= 10; // WAIT_M
+    always @(*) begin
+        // 默认维度由输入决定，先设为3x3
+        gen_target_m = 3'd3;
+        gen_target_n = 3'd3;
+        gen_target_slot = 2'd0; // 默认Slot A
+        
+        // 在Gen模式下，允许用户通过UART输入维度
+        if (sw_pin[7:5] == 3'b001) begin // Gen Mode
+            if (parser_valid && in_m == 0) begin
+                // 第一个输入数为行数M
+                if (parser_num >= 1 && parser_num <= 5) begin
+                    gen_target_m = parser_num[2:0];
+                    end
+            end else if (parser_valid && in_m != 0 && in_n == 0) begin
+                // 第二个输入数为列数N
+                if (parser_num >= 1 && parser_num <= 5) begin
+                    gen_target_n = parser_num[2:0];
                     end
                 end
-                
-                // --- Input Capture States ---
-                10: begin // WAIT_M
-                    if (parser_valid) begin
-                        gen_target_m <= parser_num[2:0];
-                        gen_state <= 11; // WAIT_N
-                    end
-                end
-                
-                11: begin // WAIT_N
-                    if (parser_valid) begin
-                        gen_target_n <= parser_num[2:0];
-                        gen_state <= 12; // WAIT_X
-                    end
-                end
-                
-                12: begin // WAIT_X (Count)
-                    if (parser_valid) begin
-                        if (parser_num == 2) begin
-                            gen_two_flag <= 1;
-                            gen_target_slot <= 0; // Start at 0
-                        end else begin
-                            gen_two_flag <= 0;
-                            // If only 1 matrix, which slot? 
-                            // User didn't specify. Default to Slot 0 or use SW?
-                            // Let's default to Slot 0 or SW[1:0]. 
-                            // Given the "Sequence" nature, maybe Slot 0 is safer.
-                            // But let's respect SW[1:0] for flexibility if count=1.
-                            gen_target_slot <= sw_pin[1:0];
-                        end
-                        
-                        // Check if dimensions valid, if 0 set default
-                        if (gen_target_m == 0) gen_target_m <= 3;
-                        if (gen_target_n == 0) gen_target_n <= 3;
-                        
-                        gen_start <= 1;
-                        gen_state <= 1; // Go to Generation
-                    end
-                end
-                
-                // --- Generation States ---
-                1: begin // WAIT_GEN_1
-                    if (gen_module_done) begin
-                        if (gen_two_flag) begin
-                            // Start Second Matrix
-                            gen_target_slot <= 1;
-                            gen_start <= 1;
-                            gen_state <= 2;
-                        end else begin
-                            // Done
-                            gen_random_done <= 1;
-                            gen_state <= 0;
+            // 第三个输入数为矩阵个数（1或2）
+            if (parser_valid && in_m != 0 && in_n != 0) begin
+                if (parser_num == 1) begin
+                    // 矩阵个数为1，用户通过SW[1:0]选择槽位
+                    gen_target_slot = sw_pin[1:0];
+                end else if (parser_num == 2) begin
+                    // 矩阵个数为2，填充所有槽位（0和1）
+                    gen_target_slot = 2'd0; // 先填充Slot0，后续逻辑会处理Slot1
                         end
                     end
                 end
                 
-                2: begin // WAIT_GEN_2
-                    if (gen_module_done) begin
-                        gen_random_done <= 1;
-                        gen_state <= 0;
-                    end
-                end
-            endcase
-        end
     end
-    
-    
     matrix_gen u_gen (
         .clk(clk), .rst_n(rst_n),
         .start(gen_start),
