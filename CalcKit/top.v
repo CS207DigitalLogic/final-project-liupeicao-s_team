@@ -43,7 +43,7 @@ module top (
     // Handshake Signals (Regs to be driven by logic)
     reg input_dim_done;
     reg input_data_done;
-    wire gen_random_done;
+    reg gen_random_done;
     wire bonus_done;
     reg display_id_conf;
     reg uart_tx_done;
@@ -173,13 +173,113 @@ module top (
     wire [2:0] gen_row, gen_col;
     wire [15:0] gen_data;
     wire gen_we;
+    wire gen_module_done; // Output from matrix_gen
+    
+    // Matrix Gen Logic
+    reg [2:0] gen_target_m;
+    reg [2:0] gen_target_n;
+    reg [1:0] gen_target_slot;
+    reg [3:0] gen_state; // Expanded for input states
+    reg gen_two_flag; // 1 if generating 2 matrices
+    
+    // Local State Machine for Gen
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            gen_state <= 0;
+            gen_random_done <= 0;
+            gen_start <= 0;
+            gen_target_slot <= 0;
+            gen_two_flag <= 0;
+            gen_target_m <= 3;
+            gen_target_n <= 3;
+        end else begin
+            gen_start <= 0;
+            gen_random_done <= 0;
+            
+            case (gen_state)
+                0: begin // IDLE: Wait for FSM State 3
+                    if (current_state == 3) begin
+                        // Reset params on entry
+                        gen_target_m <= 0; 
+                        gen_target_n <= 0;
+                        gen_two_flag <= 0;
+                        // Go to wait for inputs
+                        gen_state <= 10; // WAIT_M
+                    end
+                end
+                
+                // --- Input Capture States ---
+                10: begin // WAIT_M
+                    if (parser_valid) begin
+                        gen_target_m <= parser_num[2:0];
+                        gen_state <= 11; // WAIT_N
+                    end
+                end
+                
+                11: begin // WAIT_N
+                    if (parser_valid) begin
+                        gen_target_n <= parser_num[2:0];
+                        gen_state <= 12; // WAIT_X
+                    end
+                end
+                
+                12: begin // WAIT_X (Count)
+                    if (parser_valid) begin
+                        if (parser_num == 2) begin
+                            gen_two_flag <= 1;
+                            gen_target_slot <= 0; // Start at 0
+                        end else begin
+                            gen_two_flag <= 0;
+                            // If only 1 matrix, which slot? 
+                            // User didn't specify. Default to Slot 0 or use SW?
+                            // Let's default to Slot 0 or SW[1:0]. 
+                            // Given the "Sequence" nature, maybe Slot 0 is safer.
+                            // But let's respect SW[1:0] for flexibility if count=1.
+                            gen_target_slot <= sw_pin[1:0];
+                        end
+                        
+                        // Check if dimensions valid, if 0 set default
+                        if (gen_target_m == 0) gen_target_m <= 3;
+                        if (gen_target_n == 0) gen_target_n <= 3;
+                        
+                        gen_start <= 1;
+                        gen_state <= 1; // Go to Generation
+                    end
+                end
+                
+                // --- Generation States ---
+                1: begin // WAIT_GEN_1
+                    if (gen_module_done) begin
+                        if (gen_two_flag) begin
+                            // Start Second Matrix
+                            gen_target_slot <= 1;
+                            gen_start <= 1;
+                            gen_state <= 2;
+                        end else begin
+                            // Done
+                            gen_random_done <= 1;
+                            gen_state <= 0;
+                        end
+                    end
+                end
+                
+                2: begin // WAIT_GEN_2
+                    if (gen_module_done) begin
+                        gen_random_done <= 1;
+                        gen_state <= 0;
+                    end
+                end
+            endcase
+        end
+    end
+    
     
     matrix_gen u_gen (
         .clk(clk), .rst_n(rst_n),
         .start(gen_start),
-        .target_m(3'd3), .target_n(3'd3), // Default 3x3 for demo
-        .target_slot(2'd0),               // Default Slot A
-        .done(gen_done),
+        .target_m(gen_target_m), .target_n(gen_target_n), 
+        .target_slot(gen_target_slot),
+        .done(gen_module_done), // Internal wire
         // Mem Interface
         .gen_slot_idx(gen_slot),
         .gen_row(gen_row), .gen_col(gen_col),
@@ -251,12 +351,16 @@ module top (
     
     // --- Seg Driver ---
     Seg_Driver u_seg (
-        .clk(clk), .rst_n(rst_n),
-        .current_state(current_state), .time_left(time_left), .sw_mode(sw_pin[7:5]),
-        .in_count(in_count), // Pass input count
-        .alu_opcode(alu_opcode), // Pass Opcode
-        .bonus_cycles(bonus_cycles), // Pass Bonus Cycles
-        .seg_out(seg_data_0_pin), .seg_an(seg_cs_pin)
+        .clk(clk),
+        .rst_n(rst_n),
+        .current_state(current_state),
+        .time_left(time_left),
+        .sw_mode(sw_pin[7:5]),
+        .in_count(in_count),
+        .alu_opcode(alu_opcode),
+        .bonus_cycles(bonus_cycles),
+        .seg_out(seg_data_0_pin),
+        .seg_an(seg_cs_pin)
     );
     assign seg_data_1_pin = 8'hFF; // Unused
 
@@ -449,8 +553,8 @@ module top (
                 // STATE: GEN RANDOM
                 // -----------------------
                 3: begin // GEN_RANDOM
-                    if (!gen_done && !gen_start) gen_start <= 1;
-                    else gen_start <= 0; // Pulse it!
+                    // Handled by local state machine in Matrix Gen Logic section
+                    // We just wait for gen_random_done to be asserted by that logic
                 end
                 
                 // -----------------------

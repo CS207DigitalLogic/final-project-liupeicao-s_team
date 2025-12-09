@@ -1,212 +1,228 @@
 `timescale 1ns / 1ps
 
-module Seg_Driver(
-    input clk,
-    input rst_n,
-    input [31:0] display_val,  // 显示数值
-    output reg [7:0] seg_out,  // 段选信号
-    output reg [7:0] seg_an    // 位选信号
+module Seg_Driver (
+    input wire clk,
+    input wire rst_n,
+    input wire [3:0] current_state, // 来自 FSM 的状态
+    input wire [3:0] time_left,     // 来自 Timer 的倒计时
+    input wire [2:0] sw_mode,       // 开关模式 SW[7:5]
+    input wire [7:0] in_count,      // 当前输入计数
+    input wire [2:0] alu_opcode,    // ALU Opcode for display
+    input wire [31:0] bonus_cycles, // Bonus 周期数
+    
+    output reg [7:0] seg_out,       // 段选 (Active High)
+    output reg [7:0] seg_an         // 位选 (Active Low)
 );
 
-// 数码管显示编码查找表 (共阳极数码管，0点亮)
-// 格式: {dp, g, f, e, d, c, b, a}
-localparam [7:0] 
-    SEG_0 = 8'b11000000,  // 0
-    SEG_1 = 8'b11111001,  // 1
-    SEG_2 = 8'b10100100,  // 2
-    SEG_3 = 8'b10110000,  // 3
-    SEG_4 = 8'b10011001,  // 4
-    SEG_5 = 8'b10010010,  // 5
-    SEG_6 = 8'b10000010,  // 6
-    SEG_7 = 8'b11111000,  // 7
-    SEG_8 = 8'b10000000,  // 8
-    SEG_9 = 8'b10010000,  // 9
-    SEG_A = 8'b10001000,  // A
-    SEG_B = 8'b10000011,  // b
-    SEG_C = 8'b11000110,  // C
-    SEG_D = 8'b10100001,  // d
-    SEG_E = 8'b10000110,  // E
-    SEG_F = 8'b10001110,  // F
-    SEG_R = 8'b10101111,  // r (特殊字符)
-    SEG_MINUS = 8'b10111111, // -
-    SEG_BLANK = 8'b11111111; // 空白
+    // =========================================================================
+    // 1. Segment Encoding (Reference: lab5_verilog_basic4.pdf Style)
+    //    Format: Active High Binary (1 = ON)
+    //    Mapping: [7:0] = a b c d e f g . (MSB=a, LSB=dot/unused)
+    // =========================================================================
+    
+    // Digits 0-9
+    localparam CHAR_0 = 8'b1111_1100; // a,b,c,d,e,f
+    localparam CHAR_1 = 8'b0110_0000; // b,c
+    localparam CHAR_2 = 8'b1101_1010; // a,b,d,e,g
+    localparam CHAR_3 = 8'b1111_0010; // a,b,c,d,g
+    localparam CHAR_4 = 8'b0110_0110; // b,c,f,g
+    localparam CHAR_5 = 8'b1011_0110; // a,c,d,f,g
+    localparam CHAR_6 = 8'b1011_1110; // a,c,d,e,f,g
+    localparam CHAR_7 = 8'b1110_0000; // a,b,c
+    localparam CHAR_8 = 8'b1111_1110; // All
+    localparam CHAR_9 = 8'b1111_0110; // a,b,c,d,f,g
 
-// 字母编码定义
-localparam 
-    CHAR_A = 4'hA,
-    CHAR_B = 4'hB,
-    CHAR_C = 4'hC,
-    CHAR_D = 4'hD,
-    CHAR_E = 4'hE,
-    CHAR_F = 4'hF,
-    CHAR_R = 4'h7,  // 特殊定义
-    CHAR_MINUS = 4'h8, // 减号
-    CHAR_BLANK = 4'h9; // 空白
+    // Letters & Symbols
+    localparam CHAR_A = 8'b1110_1110; // A
+    localparam CHAR_b = 8'b0011_1110; // b
+    localparam CHAR_C = 8'b1001_1100; // C
+    localparam CHAR_c = 8'b0001_1010; // c
+    localparam CHAR_d = 8'b0111_1010; // d
+    localparam CHAR_E = 8'b1001_1110; // E
+    localparam CHAR_F = 8'b1000_1110; // F
+    localparam CHAR_G = 8'b1011_1100; // G (a,c,d,e,f)
+    localparam CHAR_H = 8'b0110_1110; // H
+    localparam CHAR_I = 8'b0010_0000; // I (b,c -> 1? or e,f -> I? Using 1 style)
+    localparam CHAR_L = 8'b0001_1100; // L
+    localparam CHAR_n = 8'b0010_1010; // n
+    localparam CHAR_o = 8'b0011_1010; // o
+    localparam CHAR_P = 8'b1100_1110; // P
+    localparam CHAR_r = 8'b0000_1010; // r
+    localparam CHAR_S = 8'b1011_0110; // S (Same as 5)
+    localparam CHAR_t = 8'b0001_1110; // t
+    localparam CHAR_U = 8'b0111_1100; // U
+    localparam CHAR_u = 8'b0011_1000; // u
+    localparam CHAR_y = 8'b0111_0110; // y
+    localparam CHAR_MINUS = 8'b0000_0010; // -
+    localparam CHAR_BLANK = 8'b0000_0000; // Blank
 
-// 动态扫描计数器
-reg [19:0] scan_counter;
-wire scan_clk = (scan_counter == 20'd100000); // 约1kHz扫描频率
+    // State Definition
+    // 假设 Error 状态为 14 (基于旧代码 8'b1001_1110 截断为 4'b1110)
+    localparam STATE_CALC_ERROR = 4'd14; 
 
-// 当前扫描的数码管位
-reg [2:0] scan_pos;
+    reg [7:0] digit_map [0:7]; // 8 Digits Buffer
 
-// 当前显示的数字/字符
-reg [3:0] current_digit;
+    // Helper Function: Hex to Char Code
+    function [7:0] get_hex;
+        input [3:0] val;
+        begin
+            case(val)
+                4'h0: get_hex = CHAR_0;
+                4'h1: get_hex = CHAR_1;
+                4'h2: get_hex = CHAR_2;
+                4'h3: get_hex = CHAR_3;
+                4'h4: get_hex = CHAR_4;
+                4'h5: get_hex = CHAR_5;
+                4'h6: get_hex = CHAR_6;
+                4'h7: get_hex = CHAR_7;
+                4'h8: get_hex = CHAR_8;
+                4'h9: get_hex = CHAR_9;
+                4'hA: get_hex = CHAR_A;
+                4'hB: get_hex = CHAR_b;
+                4'hC: get_hex = CHAR_C;
+                4'hD: get_hex = CHAR_d;
+                4'hE: get_hex = CHAR_E;
+                4'hF: get_hex = CHAR_F;
+                default: get_hex = CHAR_BLANK;
+            endcase
+        end
+    endfunction
 
-// 显示缓冲区
-reg [3:0] display_buffer [7:0];
+    // =========================================================================
+    // 2. Display Logic Mapping
+    // =========================================================================
+    always @(*) begin
+        // Default Clean
+        digit_map[7] = CHAR_BLANK; digit_map[6] = CHAR_BLANK; digit_map[5] = CHAR_BLANK; digit_map[4] = CHAR_BLANK;
+        digit_map[3] = CHAR_BLANK; digit_map[2] = CHAR_BLANK; digit_map[1] = CHAR_BLANK; digit_map[0] = CHAR_BLANK;
 
-// 扫描计数器
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n)
-        scan_counter <= 20'b0;
-    else
-        scan_counter <= scan_counter + 1'b1;
-end
-
-// 扫描位置更新
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n)
-        scan_pos <= 3'b0;
-    else if (scan_clk)
-        scan_pos <= scan_pos + 1'b1;
-end
-
-// 解析display_val到显示缓冲区
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        // 复位时显示空白
-        display_buffer[0] <= CHAR_BLANK;
-        display_buffer[1] <= CHAR_BLANK;
-        display_buffer[2] <= CHAR_BLANK;
-        display_buffer[3] <= CHAR_BLANK;
-        display_buffer[4] <= CHAR_BLANK;
-        display_buffer[5] <= CHAR_BLANK;
-        display_buffer[6] <= CHAR_BLANK;
-        display_buffer[7] <= CHAR_BLANK;
-    end else begin
-        // 根据文档要求解析显示内容
-        // display_val[31:0] 包含要显示的信息
-        // 这里根据具体应用场景解析，例如：
-        // - 显示运算模式字符 (如 "C-A-L-C")
-        // - 显示错误倒计时 (如 "Err 10")
-        
-        // 示例：显示运算模式
-        case (display_val[3:0]) // 假设低4位表示运算模式
-            4'b0000: begin // 空闲状态
-                display_buffer[7] <= CHAR_BLANK;
-                display_buffer[6] <= CHAR_BLANK;
-                display_buffer[5] <= CHAR_BLANK;
-                display_buffer[4] <= CHAR_BLANK;
-                display_buffer[3] <= CHAR_C;  // C
-                display_buffer[2] <= CHAR_A;  // A
-                display_buffer[1] <= CHAR_L;  // L
-                display_buffer[0] <= CHAR_C;  // C
+        if (current_state == STATE_CALC_ERROR) begin
+            // "Err XX" (XX = time_left)
+            digit_map[7] = CHAR_E;
+            digit_map[6] = CHAR_r;
+            digit_map[5] = CHAR_r;
+            
+            if (time_left < 10) begin
+                digit_map[1] = CHAR_BLANK;
+                digit_map[0] = get_hex(time_left);
+            end else begin
+                digit_map[1] = CHAR_1;
+                digit_map[0] = get_hex(time_left - 10);
             end
-            4'b0001: begin // 加法模式
-                display_buffer[7] <= CHAR_BLANK;
-                display_buffer[6] <= CHAR_BLANK;
-                display_buffer[5] <= CHAR_BLANK;
-                display_buffer[4] <= CHAR_BLANK;
-                display_buffer[3] <= CHAR_A;  // A
-                display_buffer[2] <= CHAR_D;  // d
-                display_buffer[1] <= CHAR_D;  // d
-                display_buffer[0] <= CHAR_BLANK;
-            end
-            4'b0010: begin // 乘法模式
-                display_buffer[7] <= CHAR_BLANK;
-                display_buffer[6] <= CHAR_BLANK;
-                display_buffer[5] <= CHAR_BLANK;
-                display_buffer[4] <= CHAR_BLANK;
-                display_buffer[3] <= CHAR_M;  // M
-                display_buffer[2] <= CHAR_U;  // u
-                display_buffer[1] <= CHAR_L;  // l
-                display_buffer[0] <= CHAR_BLANK;
-            end
-            4'b0011: begin // 错误显示 "Err XX"
-                display_buffer[7] <= CHAR_E;  // E
-                display_buffer[6] <= CHAR_R;  // r
-                display_buffer[5] <= CHAR_R;  // r
-                display_buffer[4] <= CHAR_BLANK;
-                display_buffer[3] <= display_val[11:8];  // 十位数
-                display_buffer[2] <= display_val[7:4];   // 个位数
-                display_buffer[1] <= CHAR_BLANK;
-                display_buffer[0] <= CHAR_BLANK;
-            end
-            default: begin // 默认显示
-                display_buffer[7] <= CHAR_BLANK;
-                display_buffer[6] <= CHAR_BLANK;
-                display_buffer[5] <= CHAR_BLANK;
-                display_buffer[4] <= CHAR_BLANK;
-                display_buffer[3] <= CHAR_BLANK;
-                display_buffer[2] <= CHAR_BLANK;
-                display_buffer[1] <= CHAR_BLANK;
-                display_buffer[0] <= CHAR_BLANK;
-            end
-        endcase
+        end else begin
+            case (sw_mode)
+                // -----------------------------------------------------------------
+                // Mode 0: IDLE / INPUT -> "InPut"
+                // -----------------------------------------------------------------
+                3'b000: begin 
+                    digit_map[7] = CHAR_1; // I
+                    digit_map[6] = CHAR_n;
+                    digit_map[5] = CHAR_P;
+                    digit_map[4] = CHAR_u;
+                    digit_map[3] = CHAR_t;
+                    
+                    // Show Count in Hex
+                    digit_map[1] = get_hex(in_count[7:4]);
+                    digit_map[0] = get_hex(in_count[3:0]);
+                end
+                
+                // -----------------------------------------------------------------
+                // Mode 1: GEN RANDOM -> "GEn"
+                // -----------------------------------------------------------------
+                3'b001: begin 
+                    digit_map[7] = CHAR_G;
+                    digit_map[6] = CHAR_E;
+                    digit_map[5] = CHAR_n;
+                end
+                
+                // -----------------------------------------------------------------
+                // Mode 2: DISPLAY -> "diSP"
+                // -----------------------------------------------------------------
+                3'b010: begin 
+                    digit_map[7] = CHAR_d;
+                    digit_map[6] = CHAR_1; // i
+                    digit_map[5] = CHAR_S;
+                    digit_map[4] = CHAR_P;
+                end
+                
+                // -----------------------------------------------------------------
+                // Mode 3: CALC -> "CALC" + Opcode
+                // -----------------------------------------------------------------
+                3'b011: begin 
+                    digit_map[7] = CHAR_C;
+                    digit_map[6] = CHAR_A;
+                    digit_map[5] = CHAR_L;
+                    digit_map[4] = CHAR_C;
+                    
+                    // Opcode Display
+                    case(alu_opcode)
+                        3'b000: digit_map[0] = CHAR_A; // Add
+                        3'b001: digit_map[0] = CHAR_b; // Sub
+                        3'b010: digit_map[0] = CHAR_C; // Mul
+                        3'b011: digit_map[0] = CHAR_S; // Sca
+                        3'b100: digit_map[0] = CHAR_t; // Tra
+                        default: digit_map[0] = CHAR_MINUS;
+                    endcase
+                end
+                
+                // -----------------------------------------------------------------
+                // Mode 4: BONUS -> "bOnUS"
+                // -----------------------------------------------------------------
+                3'b100: begin 
+                    if (bonus_cycles > 0) begin
+                        // Display Cycles (Hex) - Full 32 bits
+                        digit_map[7] = get_hex(bonus_cycles[31:28]);
+                        digit_map[6] = get_hex(bonus_cycles[27:24]);
+                        digit_map[5] = get_hex(bonus_cycles[23:20]);
+                        digit_map[4] = get_hex(bonus_cycles[19:16]);
+                        digit_map[3] = get_hex(bonus_cycles[15:12]);
+                        digit_map[2] = get_hex(bonus_cycles[11:8]);
+                        digit_map[1] = get_hex(bonus_cycles[7:4]);
+                        digit_map[0] = get_hex(bonus_cycles[3:0]);
+                    end else begin
+                        digit_map[7] = CHAR_b;
+                        digit_map[6] = CHAR_0; // O
+                        digit_map[5] = CHAR_n;
+                        digit_map[4] = CHAR_U;
+                        digit_map[3] = CHAR_S;
+                    end
+                end
+                
+                default: begin
+                    // Undefined Mode
+                    digit_map[3] = CHAR_MINUS; digit_map[2] = CHAR_MINUS; digit_map[1] = CHAR_MINUS; digit_map[0] = CHAR_MINUS;
+                end
+            endcase
+        end
     end
-end
 
-// 选择当前要显示的数字
-always @(*) begin
-    case (scan_pos)
-        3'b000: current_digit = display_buffer[0];
-        3'b001: current_digit = display_buffer[1];
-        3'b010: current_digit = display_buffer[2];
-        3'b011: current_digit = display_buffer[3];
-        3'b100: current_digit = display_buffer[4];
-        3'b101: current_digit = display_buffer[5];
-        3'b110: current_digit = display_buffer[6];
-        3'b111: current_digit = display_buffer[7];
-        default: current_digit = CHAR_BLANK;
-    endcase
-end
+    // =========================================================================
+    // 3. Dynamic Scan Logic
+    // =========================================================================
+    reg [19:0] scan_cnt;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) scan_cnt <= 0;
+        else scan_cnt <= scan_cnt + 1;
+    end
+    
+    // Scan Speed: ~95Hz (100MHz / 2^20 * 8 is slow, 2^17 is better)
+    wire [2:0] scan_sel = scan_cnt[19:17]; 
 
-// 段选信号输出
-always @(*) begin
-    case (current_digit)
-        4'h0: seg_out = SEG_0;
-        4'h1: seg_out = SEG_1;
-        4'h2: seg_out = SEG_2;
-        4'h3: seg_out = SEG_3;
-        4'h4: seg_out = SEG_4;
-        4'h5: seg_out = SEG_5;
-        4'h6: seg_out = SEG_6;
-        4'h7: seg_out = SEG_7;
-        4'h8: seg_out = SEG_8;
-        4'h9: seg_out = SEG_9;
-        CHAR_A: seg_out = SEG_A;
-        CHAR_B: seg_out = SEG_B;
-        CHAR_C: seg_out = SEG_C;
-        CHAR_D: seg_out = SEG_D;
-        CHAR_E: seg_out = SEG_E;
-        CHAR_F: seg_out = SEG_F;
-        CHAR_R: seg_out = SEG_R;
-        CHAR_MINUS: seg_out = SEG_MINUS;
-        CHAR_BLANK: seg_out = SEG_BLANK;
-        default: seg_out = SEG_BLANK;
-    endcase
-end
-
-// 位选信号输出 (共阳极，低电平有效)
-always @(*) begin
-    case (scan_pos)
-        3'b000: seg_an = 8'b11111110;
-        3'b001: seg_an = 8'b11111101;
-        3'b010: seg_an = 8'b11111011;
-        3'b011: seg_an = 8'b11110111;
-        3'b100: seg_an = 8'b11101111;
-        3'b101: seg_an = 8'b11011111;
-        3'b110: seg_an = 8'b10111111;
-        3'b111: seg_an = 8'b01111111;
-        default: seg_an = 8'b11111111;
-    endcase
-end
-
-// 字母定义补充
-localparam 
-    CHAR_M = 4'hB,  // 复用B的定义，实际使用时需要调整
-    CHAR_U = 4'hC,  // 复用C的定义
-    CHAR_L = 4'hD;  // 复用D的定义
+    always @(*) begin
+        // Anode Control (Active Low)
+        case(scan_sel)
+            3'd0: seg_an = 8'b1111_1110;
+            3'd1: seg_an = 8'b1111_1101;
+            3'd2: seg_an = 8'b1111_1011;
+            3'd3: seg_an = 8'b1111_0111;
+            3'd4: seg_an = 8'b1110_1111;
+            3'd5: seg_an = 8'b1101_1111;
+            3'd6: seg_an = 8'b1011_1111;
+            3'd7: seg_an = 8'b0111_1111;
+        endcase
+        
+        // Segment Output Control (Active High)
+        seg_out = digit_map[scan_sel];
+    end
 
 endmodule
