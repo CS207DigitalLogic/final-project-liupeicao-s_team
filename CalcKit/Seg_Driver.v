@@ -111,16 +111,23 @@ module Seg_Driver (
                 
                 3'b011: begin // Calc Mode
                     // "CALC  X" (X = Opcode Char)
-                    disp_val[7] = CHAR_C; disp_val[6] = CHAR_A; disp_val[5] = CHAR_L; disp_val[4] = CHAR_C;
+                    // Requirement: Keep Rightmost (disp_val[0]) as 'C'.
+                    // Requirement: Set Left 4 (disp_val[4]) as Opcode Symbol.
                     
+                    disp_val[7] = CHAR_C; disp_val[6] = CHAR_A; disp_val[5] = CHAR_L; 
+                    
+                    // Set Opcode on Left 4 (H1)
                     case (alu_opcode)
-                        3'b000: disp_val[0] = CHAR_A; // Add
-                        3'b001: disp_val[0] = CHAR_S; // Sub
-                        3'b010: disp_val[0] = CHAR_C; // Mul
-                        3'b011: disp_val[0] = CHAR_b; // Scalar
-                        3'b100: disp_val[0] = CHAR_t; // Transpose
-                        default: disp_val[0] = CHAR_MINUS;
+                        3'b000: disp_val[4] = CHAR_A; // Add
+                        3'b001: disp_val[4] = CHAR_b; // Sub
+                        3'b010: disp_val[4] = CHAR_C; // Mul
+                        3'b011: disp_val[4] = CHAR_S; // Scalar
+                        3'b100: disp_val[4] = CHAR_t; // Transpose
+                        default: disp_val[4] = CHAR_MINUS;
                     endcase
+                    
+                    disp_val[3] = CHAR_BLANK; disp_val[2] = CHAR_BLANK; disp_val[1] = CHAR_BLANK;
+                    disp_val[0] = CHAR_C; // Rightmost fixed to C
                 end
                 
                 3'b100: begin // Bonus Mode -> "bonUS J" or Cycles
@@ -194,31 +201,25 @@ module Seg_Driver (
             // If we activate seg_cs[4] (Right 1), we must drive seg_data_1. seg_data_0 is don't care.
             
             if (scan_idx < 4) begin
-                // Left Group
-                seg_data_0 <= disp_val[7 - scan_idx]; // Map 7->0 (L1), 6->1 (L2)... 
-                // Wait, logic:
-                // disp_val[7] is Left-most digit? Usually yes.
-                // Left 1 (seg_cs[0]) -> disp_val[7]
-                // Left 2 (seg_cs[1]) -> disp_val[6]
-                // ...
-                // Right 4 (seg_cs[7]) -> disp_val[0]
-                
-                // Let's stick to this mapping.
-                case(scan_idx)
-                    0: seg_data_0 <= disp_val[7];
-                    1: seg_data_0 <= disp_val[6];
-                    2: seg_data_0 <= disp_val[5];
-                    3: seg_data_0 <= disp_val[4];
-                endcase
-                seg_data_1 <= 8'b00000000; // Off
-            end else begin
-                // Right Group
+                // Left Group Scan (0-3)
+                // Left Group Segments are on seg_data_1 (B4... Group 0)
+                seg_data_1 <= disp_val[7 - scan_idx]; 
                 seg_data_0 <= 8'b00000000; // Off
+            end else begin
+                // Right Group Scan (4-7)
+                // Right Group Segments are on seg_data_0 (D4... Group 1)
+                seg_data_1 <= 8'b00000000; // Off
+                
+                // Map disp_val[3..0] to Right Group
+                // disp_val[3] -> Scan 4 (Right 1)
+                // ...
+                // disp_val[0] -> Scan 7 (Right 4)
                 case(scan_idx)
-                    4: seg_data_1 <= disp_val[3];
-                    5: seg_data_1 <= disp_val[2];
-                    6: seg_data_1 <= disp_val[1];
-                    7: seg_data_1 <= disp_val[0];
+                    4: seg_data_0 <= disp_val[3];
+                    5: seg_data_0 <= disp_val[2];
+                    6: seg_data_0 <= disp_val[1];
+                    7: seg_data_0 <= disp_val[0];
+                    default: seg_data_0 <= 8'b00000000;
                 endcase
             end
         end
