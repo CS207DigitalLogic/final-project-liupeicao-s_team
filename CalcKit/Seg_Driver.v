@@ -7,235 +7,241 @@ module Seg_Driver (
     input wire [3:0] time_left,     // 来自 Timer 的倒计时
     input wire [2:0] sw_mode,       // 开关模式 SW[7:5]
     input wire [7:0] in_count,      // 当前输入计数
-    input wire [2:0] alu_opcode,    // ALU Opcode for display
-    input wire [31:0] bonus_cycles, // Bonus 周期数
-    output reg [7:0] seg_out0,  
-    output reg [7:0] seg_out1,       // 段选 (Active High)
-    output reg [7:0] seg_an         // 位选 (Active High)
+    input wire [2:0] alu_opcode,    // 新增: ALU Opcode for display
+    input wire [31:0] bonus_cycles, // 新增: Bonus 周期数
+    
+    output reg [7:0] seg_out,       // 段选 (CA/CC depending on board, assuming Active Low for now based on top.v 'FF' init)
+    output reg [7:0] seg_an         // 位选 (Active Low)
 );
 
-    // =========================================================================
-    // 1. Segment Encoding (Reference: lab5_verilog_basic4.pdf Style)
-    //    Format: Active High Binary (1 = ON)
-    //    Mapping: [7:0] = a b c d e f g . (MSB=a, LSB=dot/unused)
-    // =========================================================================
+    // 状态定义 (参考 Central_FSM)
+    localparam STATE_IDLE           = 4'd0;
+    localparam STATE_CALC_ERROR     = 4'd12;
+    // 其他状态可根据需要显示不同内容
+
+    // 字符编码 (共阴/共阳需确认，这里假设低电平有效点亮段)
+    // . g f e d c b a
+    localparam CHAR_0 = 8'hC0; 
+    localparam CHAR_1 = 8'hF9;
+    localparam CHAR_2 = 8'hA4;
+    localparam CHAR_3 = 8'hB0;
+    localparam CHAR_4 = 8'h99;
+    localparam CHAR_5 = 8'h92;
+    localparam CHAR_6 = 8'h82;
+    localparam CHAR_7 = 8'hF8;
+    localparam CHAR_8 = 8'h80;
+    localparam CHAR_9 = 8'h90;
     
-    // Digits 0-9
-    localparam CHAR_0 = 8'b1111_1100; // a,b,c,d,e,f
-    localparam CHAR_1 = 8'b0110_0000; // b,c
-    localparam CHAR_2 = 8'b1101_1010; // a,b,d,e,g
-    localparam CHAR_3 = 8'b1111_0010; // a,b,c,d,g
-    localparam CHAR_4 = 8'b0110_0110; // b,c,f,g
-    localparam CHAR_5 = 8'b1011_0110; // a,c,d,f,g
-    localparam CHAR_6 = 8'b1011_1110; // a,c,d,e,f,g
-    localparam CHAR_7 = 8'b1110_0000; // a,b,c
-    localparam CHAR_8 = 8'b1111_1110; // All
-    localparam CHAR_9 = 8'b1111_0110; // a,b,c,d,f,g
+    localparam CHAR_A = 8'h88;
+    localparam CHAR_C = 8'hC6;
+    localparam CHAR_E = 8'h86;
+    localparam CHAR_G = 8'hC2; // 'G' like in Gen
+    localparam CHAR_H = 8'h89;
+    localparam CHAR_I = 8'hCF; // 'I'
+    localparam CHAR_L = 8'hC7;
+    localparam CHAR_N = 8'hC8; // 'n'
+    localparam CHAR_O = 8'hC0; // 'O' (0)
+    localparam CHAR_P = 8'h8C;
+    localparam CHAR_R = 8'hAF; // 'r'
+    localparam CHAR_S = 8'h92; // 'S' (5)
+    localparam CHAR_U = 8'hC1; // 'U'
+    localparam CHAR_b = 8'h83; // 'b' (Bonus)
+    localparam CHAR_d = 8'hA1; // 'd'
+    localparam CHAR_o = 8'hA3; // 'o'
+    localparam CHAR_T = 8'h87; // 't' used for Transpose (T)
+    localparam CHAR_J = 8'hE1; // 'J' (approx)
+    localparam CHAR_t = 8'h87; // 't'
+    localparam CHAR_F = 8'h8E; // 'F'
+    localparam CHAR_BLANK = 8'hFF;
+    localparam CHAR_MINUS = 8'hBF; // '-'
+    localparam CHAR_y     = 8'h91; // 'y'
 
-    // Letters & Symbols
-    localparam CHAR_A = 8'b1110_1110; // A
-    localparam CHAR_b = 8'b0011_1110; // b
-    localparam CHAR_C = 8'b1001_1100; // C
-    localparam CHAR_c = 8'b0001_1010; // c
-    localparam CHAR_d = 8'b0111_1010; // d
-    localparam CHAR_E = 8'b1001_1110; // E
-    localparam CHAR_F = 8'b1000_1110; // F
-    localparam CHAR_G = 8'b1011_1100; // G (a,c,d,e,f)
-    localparam CHAR_H = 8'b0110_1110; // H
-    localparam CHAR_I = 8'b0010_0000; // I (b,c -> 1? or e,f -> I? Using 1 style)
-    localparam CHAR_L = 8'b0001_1100; // L
-    localparam CHAR_n = 8'b0010_1010; // n
-    localparam CHAR_o = 8'b0011_1010; // o
-    localparam CHAR_P = 8'b1100_1110; // P
-    localparam CHAR_r = 8'b0000_1010; // r
-    localparam CHAR_S = 8'b1011_0110; // S (Same as 5)
-    localparam CHAR_t = 8'b0001_1110; // t
-    localparam CHAR_U = 8'b0111_1100; // U
-    localparam CHAR_u = 8'b0011_1000; // u
-    localparam CHAR_y = 8'b0111_0110; // y
-    localparam CHAR_MINUS = 8'b0000_0010; // -
-    localparam CHAR_BLANK = 8'b0000_0000; // Blank
-
-    // State Definition
-    // 假设 Error 状态为 14 (基于旧代码 8'b1001_1110 截断为 4'b1110)
-    localparam STATE_CALC_ERROR = 4'd14; 
-
-    reg [7:0] digit_map [0:7]; // 8 Digits Buffer
-
-    // Helper Function: Hex to Char Code
-    function [7:0] get_hex;
-        input [3:0] val;
-        begin
-            case(val)
-                4'h0: get_hex = CHAR_0;
-                4'h1: get_hex = CHAR_1;
-                4'h2: get_hex = CHAR_2;
-                4'h3: get_hex = CHAR_3;
-                4'h4: get_hex = CHAR_4;
-                4'h5: get_hex = CHAR_5;
-                4'h6: get_hex = CHAR_6;
-                4'h7: get_hex = CHAR_7;
-                4'h8: get_hex = CHAR_8;
-                4'h9: get_hex = CHAR_9;
-                4'hA: get_hex = CHAR_A;
-                4'hB: get_hex = CHAR_b;
-                4'hC: get_hex = CHAR_C;
-                4'hD: get_hex = CHAR_d;
-                4'hE: get_hex = CHAR_E;
-                4'hF: get_hex = CHAR_F;
-                default: get_hex = CHAR_BLANK;
-            endcase
-        end
-    endfunction
-
-    // =========================================================================
-    // 2. Display Logic Mapping
-    // =========================================================================
+    reg [7:0] disp_data [0:7]; // 8个数码管的显示内容
+    
+    // Need Opcode input
+    // But interface only has sw_mode[2:0]
+    // Wait, top.v passes sw_pin[7:5] as sw_mode.
+    // But opcode is selected by sw_pin[4:2] in top.v logic.
+    // We need opcode passed to Seg_Driver to display T, A, B, C, J
+    // Or we can infer it from sw_mode if user uses sw[4:2] for opcode selection?
+    // But Seg_Driver only gets `sw_mode` (3 bits).
+    // We need to add `alu_opcode` input to Seg_Driver.
+    
+    // 1. 根据状态解码显示内容
     always @(*) begin
-        // Default Clean
-        // digit_map[7] = CHAR_BLANK; digit_map[6] = CHAR_BLANK; digit_map[5] = CHAR_BLANK; digit_map[4] = CHAR_BLANK;
-        // digit_map[3] = CHAR_BLANK; digit_map[2] = CHAR_BLANK; digit_map[1] = CHAR_BLANK; digit_map[0] = CHAR_BLANK;
+        // 默认全灭
+        disp_data[7] = CHAR_BLANK; disp_data[6] = CHAR_BLANK; disp_data[5] = CHAR_BLANK; disp_data[4] = CHAR_BLANK;
+        disp_data[3] = CHAR_BLANK; disp_data[2] = CHAR_BLANK; disp_data[1] = CHAR_BLANK; disp_data[0] = CHAR_BLANK;
 
         if (current_state == STATE_CALC_ERROR) begin
-            // "Err XX" (XX = time_left)
-            digit_map[7] = CHAR_E;
-            digit_map[6] = CHAR_r;
-            digit_map[5] = CHAR_r;
-            
-            if (time_left < 10) begin
-                digit_map[1] = CHAR_BLANK;
-                digit_map[0] = get_hex(time_left);
+            // 显示 "Err  XX" (XX为倒计时)
+            disp_data[7] = CHAR_E;
+            disp_data[6] = CHAR_R;
+            disp_data[5] = CHAR_R;
+            disp_data[4] = CHAR_BLANK;
+            // 倒计时数字
+            if (time_left >= 10) begin
+                disp_data[1] = CHAR_1;
+                disp_data[0] = CHAR_0;
             end else begin
-                digit_map[1] = CHAR_1;
-                digit_map[0] = get_hex(time_left - 10);
+                disp_data[1] = CHAR_BLANK;
+                case(time_left)
+                    0: disp_data[0] = CHAR_0;
+                    1: disp_data[0] = CHAR_1;
+                    2: disp_data[0] = CHAR_2;
+                    3: disp_data[0] = CHAR_3;
+                    4: disp_data[0] = CHAR_4;
+                    5: disp_data[0] = CHAR_5;
+                    6: disp_data[0] = CHAR_6;
+                    7: disp_data[0] = CHAR_7;
+                    8: disp_data[0] = CHAR_8;
+                    9: disp_data[0] = CHAR_9;
+                    default: disp_data[0] = CHAR_MINUS;
+                endcase
             end
         end else begin
+            // 根据模式开关显示
             case (sw_mode)
-                // -----------------------------------------------------------------
-                // Mode 0: IDLE / INPUT -> "InPut"
-                // -----------------------------------------------------------------
-                3'b000: begin 
-                    digit_map[7] = CHAR_1; // I
-                    digit_map[6] = CHAR_n;
-                    digit_map[5] = CHAR_P;
-                    digit_map[4] = CHAR_u;
-                    digit_map[3] = CHAR_t;
-                    
-                    // Show Count in Hex
-                    digit_map[1] = get_hex(in_count[7:4]);
-                    digit_map[0] = get_hex(in_count[3:0]);
-                end
-                
-                // -----------------------------------------------------------------
-                // Mode 1: GEN RANDOM -> "GEn"
-                // -----------------------------------------------------------------
-                3'b001: begin 
-                    digit_map[7] = CHAR_G;
-                    digit_map[6] = CHAR_E;
-                    digit_map[5] = CHAR_n;
-                end
-                
-                // -----------------------------------------------------------------
-                // Mode 2: DISPLAY -> "diSP"
-                // -----------------------------------------------------------------
-                3'b010: begin 
-                    digit_map[7] = CHAR_d;
-                    digit_map[6] = CHAR_1; // i
-                    digit_map[5] = CHAR_S;
-                    digit_map[4] = CHAR_P;
-                end
-                
-                // -----------------------------------------------------------------
-                // Mode 3: CALC -> "CALC" + Opcode
-                // -----------------------------------------------------------------
-                3'b011: begin 
-                    digit_map[7] = CHAR_C;
-                    digit_map[6] = CHAR_A;
-                    digit_map[5] = CHAR_L;
-                    digit_map[4] = CHAR_C;
-                    
-                    // Opcode Display
-                    case(alu_opcode)
-                        3'b000: digit_map[0] = CHAR_A; // Add
-                        3'b001: digit_map[0] = CHAR_b; // Sub
-                        3'b010: digit_map[0] = CHAR_C; // Mul
-                        3'b011: digit_map[0] = CHAR_S; // Sca
-                        3'b100: digit_map[0] = CHAR_t; // Tra
-                        default: digit_map[0] = CHAR_MINUS;
-                    endcase
-                end
-                
-                // -----------------------------------------------------------------
-                // Mode 4: BONUS -> "bOnUS"
-                // -----------------------------------------------------------------
-                3'b100: begin 
-                    if (bonus_cycles > 0) begin
-                        // Display Cycles (Hex) - Full 32 bits
-                        digit_map[7] = get_hex(bonus_cycles[31:28]);
-                        digit_map[6] = get_hex(bonus_cycles[27:24]);
-                        digit_map[5] = get_hex(bonus_cycles[23:20]);
-                        digit_map[4] = get_hex(bonus_cycles[19:16]);
-                        digit_map[3] = get_hex(bonus_cycles[15:12]);
-                        digit_map[2] = get_hex(bonus_cycles[11:8]);
-                        digit_map[1] = get_hex(bonus_cycles[7:4]);
-                        digit_map[0] = get_hex(bonus_cycles[3:0]);
-                    end else begin
-                        digit_map[7] = CHAR_b;
-                        digit_map[6] = CHAR_0; // O
-                        digit_map[5] = CHAR_n;
-                        digit_map[4] = CHAR_U;
-                        digit_map[3] = CHAR_S;
+                3'b000: begin // Input Dim -> "InPut"
+                    disp_data[7] = CHAR_I; disp_data[6] = CHAR_N; disp_data[5] = CHAR_P; disp_data[4] = CHAR_U; disp_data[3] = CHAR_t;
+                    // Show count on last 2 digits
+                    if (in_count > 0) begin
+                         case (in_count % 10)
+                             0: disp_data[0] = CHAR_0; 1: disp_data[0] = CHAR_1; 2: disp_data[0] = CHAR_2; 3: disp_data[0] = CHAR_3;
+                             4: disp_data[0] = CHAR_4; 5: disp_data[0] = CHAR_5; 6: disp_data[0] = CHAR_6; 7: disp_data[0] = CHAR_7;
+                             8: disp_data[0] = CHAR_8; 9: disp_data[0] = CHAR_9; default: disp_data[0] = CHAR_BLANK;
+                         endcase
+                         case ((in_count / 10) % 10)
+                             0: disp_data[1] = CHAR_0; 1: disp_data[1] = CHAR_1; 2: disp_data[1] = CHAR_2; 3: disp_data[1] = CHAR_3;
+                             4: disp_data[1] = CHAR_4; 5: disp_data[1] = CHAR_5; 6: disp_data[1] = CHAR_6; 7: disp_data[1] = CHAR_7;
+                             8: disp_data[1] = CHAR_8; 9: disp_data[1] = CHAR_9; default: disp_data[1] = CHAR_BLANK;
+                         endcase
                     end
                 end
-                
-                default: begin
-                    // Undefined Mode
-                    digit_map[3] = CHAR_MINUS; digit_map[2] = CHAR_MINUS; digit_map[1] = CHAR_MINUS; digit_map[0] = CHAR_MINUS;
+                3'b001: begin // Gen Random -> "Gen"
+                    disp_data[7] = CHAR_G; disp_data[6] = CHAR_E; disp_data[5] = CHAR_N;
+                end
+                3'b010: begin // Display -> "diSP"
+                    disp_data[7] = CHAR_d; disp_data[6] = CHAR_I; disp_data[5] = CHAR_S; disp_data[4] = CHAR_P;
+                end
+                3'b011: begin // Calc -> "CALC" + Opcode
+                    disp_data[7] = CHAR_C; disp_data[6] = CHAR_A; disp_data[5] = CHAR_L; disp_data[4] = CHAR_C;
+                    // Display Opcode char at digit 0
+                    // Opcode: 000(ADD), 001(SUB), 010(MUL), 011(SCA), 100(TRA)
+                    // User Req: T(Trans), A(Add), B(Scalar/Beta?), C(Mul?), J(Conv)
+                    // Mapping:
+                    // ADD (000) -> A
+                    // SUB (001) -> S (User didn't specify SUB char, assuming 'S' or maybe only ADD is required?)
+                    // MUL (010) -> C (User said Matrix Mul C)
+                    // SCA (011) -> B (User said Scalar Mul B)
+                    // TRA (100) -> T
+                    // CONV is Bonus mode (sw_mode=100), handled below.
+                    
+                    case (alu_opcode)
+                        3'b000: disp_data[0] = CHAR_A; // ADD
+                        3'b001: disp_data[0] = CHAR_S; // SUB (User didn't specify, using S)
+                        3'b010: disp_data[0] = CHAR_C; // MUL (User: C)
+                        3'b011: disp_data[0] = CHAR_b; // SCA (User: B) - Using 'b' for B
+                        3'b100: disp_data[0] = CHAR_T; // TRA (User: T)
+                        default: disp_data[0] = CHAR_BLANK;
+                    endcase
+                end
+                3'b100: begin // Bonus -> "bonUS" + J
+                    if (bonus_cycles > 0) begin
+                        // Display "Cy" + count
+                        disp_data[7] = CHAR_C; disp_data[6] = CHAR_y; 
+                        disp_data[5] = CHAR_BLANK; disp_data[4] = CHAR_BLANK;
+                        disp_data[3] = (bonus_cycles >= 1000) ? get_char((bonus_cycles/1000)%10) : CHAR_BLANK;
+                        disp_data[2] = (bonus_cycles >= 100) ? get_char((bonus_cycles/100)%10) : CHAR_BLANK;
+                        disp_data[1] = (bonus_cycles >= 10) ? get_char((bonus_cycles/10)%10) : CHAR_BLANK;
+                        disp_data[0] = get_char(bonus_cycles%10);
+                    end else begin
+                        disp_data[7] = CHAR_b; disp_data[6] = CHAR_o; disp_data[5] = CHAR_N; disp_data[4] = CHAR_U; disp_data[3] = CHAR_S;
+                        disp_data[0] = CHAR_J;
+                    end
+                end
+                3'b101: begin // Config -> "ConF"
+                    disp_data[7] = CHAR_C; disp_data[6] = CHAR_o; disp_data[5] = CHAR_N; disp_data[4] = CHAR_F;
+                    // Show current config value? We need input for that. 
+                    // Seg_Driver doesn't have config_val input.
+                    // But we have 'time_left' input. In config mode (State 0), time_left is not active.
+                    // Wait, top.v connects 'time_left' from Timer_Unit.
+                    // Timer_Unit output time_left depends on 'start_timer'.
+                    // If timer not started, time_left is 0 or reset value.
+                    // To show the config value, we need to pass it to Seg_Driver.
+                    // Let's just show "ConF" for now to be safe, or "ConF 10" if we can.
+                    // Actually, user sets it blindly? No, usually want feedback.
+                    // For now, just "ConF" is better than "----".
+                    // If user enters number, parser works in top.v.
+                    // We can reuse 'in_count' or 'time_left' if we multiplex in top.v?
+                    // Too risky to change top.v interface now.
+                    // Just "ConF" is enough to show mode is active.
+                end
+                default: begin // "----"
+                    disp_data[7] = CHAR_MINUS; disp_data[6] = CHAR_MINUS; disp_data[5] = CHAR_MINUS; disp_data[4] = CHAR_MINUS;
                 end
             endcase
         end
     end
 
-    // =========================================================================
-    // 3. Dynamic Scan Logic
-    // =========================================================================
-    reg [19:0] scan_cnt;
+    // 2. 动态扫描逻辑
+    reg [19:0] scan_cnt; // 扫描分频
+    reg [2:0]  scan_idx; // 当前扫描位 0-7
+    
+    // User reports "All 8s" -> Likely Segments Active High or Anode Active High inverted?
+    // If user sees 8s with my code (seg_an active low scan, seg_out active low char), 
+    // then 'FF' output (BLANK) is turning all ON.
+    // This implies Segment lines are Active High (Common Cathode).
+    // If so, we need to invert seg_out.
+    // Also, if Anodes are Active Low, we keep seg_an.
+    // Let's invert seg_out logic.
+    
+    reg [7:0] seg_out_inv;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             scan_cnt <= 0;
-            seg_an <= 8'h00; // Reset All Off (Active High)
-            seg_out0 <= 8'h00; // Reset All Off
-            seg_out1 <= 8'h00; 
+            scan_idx <= 0;
+            seg_an   <= 8'hFF;
+            seg_out  <= 8'h00; // Inverted BLANK (FF -> 00)
         end else begin
+            // 刷新率控制: 100MHz / 2^17 ~= 762Hz (每位 ~100Hz)
             scan_cnt <= scan_cnt + 1;
-            seg_an=8'b1000_0001;
-            seg_out0=digit_map[0];
-            seg_out1=digit_map[7];
-            // Scan Speed: ~95Hz (100MHz / 2^20 * 8 is slow, 2^17 is better)
-            // Use blocking assignments in always block for next state or just standard sync update
-            // Here using the scan_cnt directly to derive select
+            if (scan_cnt[16]) begin 
+                scan_cnt <= 0;
+                scan_idx <= scan_idx + 1;
+            end
+
+    // 位选输出 (Active Low)
+            case (scan_idx)
+                3'd0: seg_an <= 8'b1111_1110;
+                3'd1: seg_an <= 8'b1111_1101;
+                3'd2: seg_an <= 8'b1111_1011;
+                3'd3: seg_an <= 8'b1111_0111;
+                3'd4: seg_an <= 8'b1110_1111;
+                3'd5: seg_an <= 8'b1101_1111;
+                3'd6: seg_an <= 8'b1011_1111;
+                3'd7: seg_an <= 8'b0111_1111;
+            endcase
+
+            // 段选输出
+            // If Board is Common Cathode (Active High Segs):
+            // We need '1' to light up. 
+            // My CHAR_X codes are Active Low (0 to light).
+            // So we invert them. ~disp_data.
+            seg_out <= ~disp_data[scan_idx];
         end
     end
 
-
-    // wire [2:0] scan_sel = scan_cnt[19:17]; 
-    // always @(*) begin
-    //     // Anode Control (Active High)
-    //     // 0000_0001, 0000_0010, ...
-    //     case(scan_sel)
-    //         3'd0: seg_an = 8'b0000_0001;
-    //         3'd1: seg_an = 8'b0000_0010;
-    //         3'd2: seg_an = 8'b0000_0100;
-    //         3'd3: seg_an = 8'b0000_1000;
-    //         3'd4: seg_an = 8'b0001_0000;
-    //         3'd5: seg_an = 8'b0010_0000;
-    //         3'd6: seg_an = 8'b0100_0000;
-    //         3'd7: seg_an = 8'b1000_0000;
-    //     endcase
-        
-    //     // Segment Output Control (Active High)
-    //     seg_out = digit_map[scan_sel];
-    // end
-    
+    function [7:0] get_char;
+        input [3:0] val;
+        begin
+            case(val)
+                0: get_char = CHAR_0; 1: get_char = CHAR_1; 2: get_char = CHAR_2; 3: get_char = CHAR_3;
+                4: get_char = CHAR_4; 5: get_char = CHAR_5; 6: get_char = CHAR_6; 7: get_char = CHAR_7;
+                8: get_char = CHAR_8; 9: get_char = CHAR_9; default: get_char = CHAR_BLANK;
+            endcase
+        end
+    endfunction
 
 endmodule

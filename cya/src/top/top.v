@@ -150,6 +150,8 @@ module top (
         .alu_rd_data(alu_rd_data),
         .alu_current_m(alu_cur_m),
         .alu_current_n(alu_cur_n),
+        .user_current_m(print_m), // Hook up for dynamic printing
+        .user_current_n(print_n), // Hook up for dynamic printing
         
         .alu_wr_slot(alu_wr_slot),
         .alu_wr_row(alu_wr_row),
@@ -208,23 +210,31 @@ module top (
     wire conv_res_valid;
     wire [1:0] conv_rd_slot;
     wire [2:0] conv_rd_row, conv_rd_col;
+    wire [31:0] bonus_cycles;
     
     bonus_conv u_conv (
         .clk(clk), .rst_n(rst_n), .start_conv(conv_start),
         .mem_rd_slot(conv_rd_slot), .mem_rd_row(conv_rd_row), .mem_rd_col(conv_rd_col),
         .mem_rd_data(mux_user_rd_data), // Reads from User Port
-        .conv_res_data(conv_res_data), .conv_res_valid(conv_res_valid), .conv_done(bonus_done)
+        .conv_res_data(conv_res_data), .conv_res_valid(conv_res_valid), .conv_done(bonus_done),
+        .total_cycles(bonus_cycles)
     );
 
     // --- Timer Unit ---
     reg timer_start;
     wire [3:0] time_left;
-    
+    reg [3:0] config_timer_val; // 动态配置的倒计时时间
+
     Timer_Unit u_timer (
         .clk(clk), .rst_n(rst_n), .start_timer(timer_start),
+        .config_time(config_timer_val),
         .time_left(time_left), .timer_done(error_timeout)
     );
     
+    // --- Input Error Timer ---
+    reg [25:0] error_led_timer;
+    wire input_error_active = (error_led_timer != 0);
+
     // --- LED Driver ---
     wire [1:0] status_led;
     assign led_pin[1:0] = status_led;
@@ -232,7 +242,7 @@ module top (
     
     LED_Driver u_led (
         .clk(clk), .rst_n(rst_n),
-        .err_flag(alu_error), .calc_busy(!alu_done && current_state == 10), 
+        .err_flag(alu_error || input_error_active), .calc_busy(!alu_done && current_state == 10), 
         .conv_busy(!bonus_done && current_state == 4),
         .current_state(current_state),
         .led(status_led)
@@ -242,6 +252,9 @@ module top (
     Seg_Driver u_seg (
         .clk(clk), .rst_n(rst_n),
         .current_state(current_state), .time_left(time_left), .sw_mode(sw_pin[7:5]),
+        .in_count(in_count), // Pass input count
+        .alu_opcode(alu_opcode), // Pass Opcode
+        .bonus_cycles(bonus_cycles), // Pass Bonus Cycles
         .seg_out(seg_data_0_pin), .seg_an(seg_cs_pin)
     );
     assign seg_data_1_pin = 8'hFF; // Unused
@@ -266,10 +279,10 @@ module top (
     // --- 7.3 Print Logic ---
     reg [1:0] print_slot;
     reg [2:0] print_row, print_col;
-    reg [2:0] print_m, print_n;
+    wire [2:0] print_m, print_n; // Driven by matrix_mem
     reg [3:0] print_state; // Internal sub-state for printing
     
-    // ASCII Conversion logic (Same as old top.v)
+    // ASCII Conversion logic
     reg [15:0] pr_val_buf;
     reg        pr_is_neg;
     reg [3:0]  pr_digits[0:4];
@@ -278,7 +291,10 @@ module top (
     reg [2:0]  pr_calc_cnt;
     reg signed [15:0] pr_signed_val;
     
-    localparam P_IDLE=0, P_READ=1, P_LATCH=2, P_CALC=3, P_SIGN=4, P_DIGIT=5, P_SPACE=6, P_DONE=7;
+    localparam P_IDLE=0, P_START=1, P_READ=2, P_LATCH=3, P_CALC=4, P_SIGN=5, P_DIGIT=6, P_SPACE=7, P_ROW_END=8, P_MATRIX_END=9, P_DONE=10;
+
+    reg [3:0] reset_cnt;
+    reg [19:0] reset_timer;
 
     // --- 7.4 Main Control Logic ---
     
@@ -303,6 +319,10 @@ module top (
             
             print_state <= P_IDLE;
             tx_start <= 0;
+            error_led_timer <= 0;
+            
+            reset_cnt <= 0;
+            reset_timer <= 0;
             
         end else begin
             // Default Pulses
@@ -318,20 +338,90 @@ module top (
             result_display_done <= 0;
             conv_start <= 0;
             tx_start <= 0; // UART TX Start Pulse
+            
+            // Default Config Timer Val
+            if (rst_n == 0) config_timer_val <= 4'd10; // Init to 10s
+
+            // Update Config Timer via Parser in IDLE or special mode?
+            // Requirement: "系统运行过程中用户输入指定倒计时"
+            // Let's assume user can input a single number in IDLE mode to set timer if not entering matrix?
+            // Or maybe a special SW combination? 
+            // Given SW[7:5] usage:
+            // 000: Input
+            // 001: Gen
+            // 010: Display
+            // 011: Calc
+            // 100: Bonus
+            // Let's use SW[7:5] = 101 (5) for Config Mode
+            
+            if (current_state == 0 && sw_pin[7:5] == 3'b101) begin
+                if (parser_valid) begin
+                    if (parser_num >= 5 && parser_num <= 15) begin
+                        config_timer_val <= parser_num[3:0];
+                    end
+                end
+            end
+
+            // Decrement Error Timer
+            if (error_led_timer > 0) error_led_timer <= error_led_timer - 1;
+
+            // --- Emergency Reset Logic ---
+            
+            if (btn_c_re) begin
+                 reset_cnt <= reset_cnt + 1;
+                 reset_timer <= 0;
+            end else if (reset_timer < 20'd100_0000) begin // 10ms timeout for rapid press
+                 reset_timer <= reset_timer + 1;
+            end else begin
+                 reset_cnt <= 0;
+            end
+            
+            if (reset_cnt >= 8) begin
+                 // Trigger Soft Reset
+                 input_dim_done <= 0;
+                 input_data_done <= 0;
+                 gen_start <= 0;
+                 alu_start <= 0;
+                 conv_start <= 0;
+                 in_m <= 0; in_n <= 0; in_count <= 0;
+                 print_state <= P_IDLE;
+                 reset_cnt <= 0;
+            end
+            
+            // Clear in_m/in_n when returning to IDLE from INPUT or CALC
+            if (current_state == 0) begin
+                in_m <= 0;
+                in_n <= 0;
+            end
 
             case (current_state)
                 // -----------------------
                 // STATE: INPUT DIM
                 // -----------------------
                 1: begin // INPUT_DIM
+                    // Clear previous state when entering
+                    if (in_count != 0) in_count <= 0; 
+                    
                     if (parser_valid) begin
-                        if (in_m == 0) begin
-                            in_m <= parser_num[2:0]; // First number: M
+                        if (parser_num >= 1 && parser_num <= 5) begin
+                            if (in_m == 0) begin
+                                in_m <= parser_num[2:0]; // First number: M
+                            end else begin
+                                // Check if N is valid (not 0)
+                                if (parser_num[2:0] != 0) begin
+                                    in_n <= parser_num[2:0]; // Second number: N
+                                    in_total <= in_m * parser_num[2:0];
+                                    input_dim_done <= 1; // Pulse FSM
+                                    in_count <= 0;
+                                end else begin
+                                    check_invalid <= 1; 
+                                    error_led_timer <= 26'd50_000_000;
+                                end
+                            end
                         end else begin
-                            in_n <= parser_num[2:0]; // Second number: N
-                            in_total <= in_m * parser_num[2:0];
-                            input_dim_done <= 1; // Pulse FSM
-                            in_count <= 0;
+                            // Invalid Dimension (Out of range 1-5)
+                            check_invalid <= 1; 
+                            error_led_timer <= 26'd50_000_000; // Blink LED
                         end
                     end
                 end
@@ -341,9 +431,15 @@ module top (
                 // -----------------------
                 2: begin // INPUT_DATA
                     if (parser_valid) begin
-                        in_count <= in_count + 1;
-                        if (in_count + 1 == in_total) begin
-                            input_data_done <= 1;
+                        if (parser_num <= 9) begin
+                            in_count <= in_count + 1;
+                            if (in_count + 1 == in_total) begin
+                                input_data_done <= 1;
+                            end
+                        end else begin
+                            // Invalid Element (>9)
+                            check_invalid <= 1;
+                            error_led_timer <= 26'd50_000_000; // Blink LED
                         end
                     end
                 end
@@ -352,11 +448,8 @@ module top (
                 // STATE: GEN RANDOM
                 // -----------------------
                 3: begin // GEN_RANDOM
-                    // Triggered by FSM entry. 
-                    // We need edge detection on state entry? 
-                    // Or FSM waits for done.
-                    // Let's trigger once.
-                    if (!gen_done && !gen_start) gen_start <= 1; 
+                    if (!gen_done && !gen_start) gen_start <= 1;
+                    else gen_start <= 0; // Pulse it!
                 end
                 
                 // -----------------------
@@ -364,16 +457,13 @@ module top (
                 // -----------------------
                 4: begin // BONUS_RUN
                     if (!bonus_done && !conv_start) conv_start <= 1;
-                    // Stream output logic handled below
+                    else conv_start <= 0; // Pulse it!
                 end
                 
                 // -----------------------
                 // STATE: DISPLAY WAIT
                 // -----------------------
                 5: begin // DISPLAY_WAIT
-                    // Wait for user to select Matrix ID via SW[4:0] or UART?
-                    // Doc says: "Wait for user to select matrix ID".
-                    // Let's assume SW[4:0] selects Slot (0,1,2)
                     if (btn_c_re) begin
                         print_slot <= sw_pin[1:0]; // Use SW[1:0] for slot
                         display_id_conf <= 1;
@@ -385,7 +475,6 @@ module top (
                 // STATE: DISPLAY PRINT
                 // -----------------------
                 6: begin // DISPLAY_PRINT
-                    // Trigger Print State Machine
                     if (print_state == P_DONE) begin
                         uart_tx_done <= 1;
                         print_state <= P_IDLE;
@@ -396,17 +485,14 @@ module top (
                 // STATE: CALC SELECT OP
                 // -----------------------
                 7: begin // CALC_SELECT_OP
-                    // Handled by FSM transition on Btn_C
-                    // We just latch opcode here
-                    alu_opcode <= sw_pin[2:0]; // Use SW[2:0] for Opcode
+                    alu_opcode <= sw_pin[4:2]; 
                 end
                 
                 // -----------------------
                 // STATE: CALC SELECT MAT
                 // -----------------------
                 8: begin // CALC_SELECT_MAT
-                    // Latch scalar if needed
-                    if (alu_opcode == 3'b011) alu_scalar <= {8'b0, sw_pin}; // Simple scalar from SW
+                    if (alu_opcode == 3'b011) alu_scalar <= {8'b0, sw_pin}; 
                     if (btn_c_re) calc_mat_conf <= 1;
                 end
                 
@@ -414,11 +500,6 @@ module top (
                 // STATE: CALC CHECK
                 // -----------------------
                 9: begin // CALC_CHECK
-                    // Simple check logic (Real check is inside ALU actually, but FSM wants explicit signal)
-                    // Let's assume valid for now, or read dims from Mem?
-                    // Since ALU has internal check state, maybe we just pass VALID and let ALU error out?
-                    // Doc says FSM has CHECK state. 
-                    // Let's send check_valid = 1 immediately to let ALU handle it.
                     check_valid <= 1; 
                 end
                 
@@ -426,10 +507,6 @@ module top (
                 // STATE: CALC EXEC
                 // -----------------------
                 10: begin // CALC_EXEC
-                    // Trigger ALU
-                    // Need to ensure start is pulsed ONCE upon entry
-                    // We can detect state transition or just pulse if not busy?
-                    // Better: use a flag "alu_started"
                     if (!alu_done && !alu_start) alu_start <= 1;
                 end
                 
@@ -437,7 +514,6 @@ module top (
                 // STATE: CALC DONE
                 // -----------------------
                 11: begin // CALC_DONE
-                    // Auto print result (Slot C)
                     print_slot <= 2'd2; // Slot C
                     if (print_state == P_DONE) begin
                         result_display_done <= 1;
@@ -450,7 +526,10 @@ module top (
                 // -----------------------
                 12: begin // CALC_ERROR
                     timer_start <= 1;
-                    // Timer will assert error_timeout eventually
+                    // Allow user to change selection and confirm during error
+                    // Same logic as CALC_SELECT_MAT
+                    if (alu_opcode == 3'b011) alu_scalar <= {8'b0, sw_pin}; 
+                    if (btn_c_re) calc_mat_conf <= 1; // This triggers transition to CHECK in FSM
                 end
                 
             endcase
@@ -459,11 +538,16 @@ module top (
             if ((current_state == 6 || current_state == 11) && !uart_tx_done && !result_display_done) begin
                 case (print_state)
                     P_IDLE: begin
-                        // Need to read dimensions first?
-                        // For now assume fixed 3x3 or read from logic?
-                        // Let's rely on Mem to provide current_m/n when we set slot.
                         print_row <= 0; print_col <= 0;
-                        print_state <= P_READ;
+                        print_state <= P_START;
+                    end
+                    P_START: begin
+                        // Send '['
+                        if (!tx_busy) begin 
+                            tx_data <= 8'h5B; // '['
+                            tx_start <= 1; 
+                            print_state <= P_READ; 
+                        end
                     end
                     P_READ: begin
                         // Mux sets addr, wait 1 cycle
@@ -502,7 +586,7 @@ module top (
                         if (!tx_busy) begin tx_data <= 8'h2D; tx_start <= 1; print_state <= P_DIGIT; end
                     end
                     P_DIGIT: begin
-                        if (!tx_busy && !tx_start) begin // Wait for sign TX if any
+                        if (!tx_busy && !tx_start) begin 
                              tx_data <= pr_digits[pr_send_idx] + 8'h30;
                              tx_start <= 1;
                              if (pr_digit_cnt == 1) print_state <= P_SPACE;
@@ -514,26 +598,45 @@ module top (
                     end
                     P_SPACE: begin
                         if (!tx_busy && !tx_start) begin
-                            tx_data <= 8'h20; // Space
-                            tx_start <= 1;
-                            // Next Element
-                            // We need Dimensions here. 
-                            // Assume 3x3 for simplicity OR read dim.
-                            // For robustness, let's loop 3x3. 
-                            // REAL IMPLEMENTATION SHOULD READ DIMS.
-                            if (print_col == 2) begin // Hardcoded 3 cols
-                                if (print_row == 2) begin // Hardcoded 3 rows
-                                    print_state <= P_DONE;
-                                end else begin
-                                    print_row <= print_row + 1;
-                                    print_col <= 0;
-                                    print_state <= P_READ;
-                                end
+                            if (print_col == print_n - 1) begin
+                                // End of Row
+                                print_state <= P_ROW_END;
                             end else begin
+                                // Next Col
+                                tx_data <= 8'h20; // Space
+                                tx_start <= 1;
                                 print_col <= print_col + 1;
                                 print_state <= P_READ;
                             end
                         end
+                    end
+                    P_ROW_END: begin
+                        if (!tx_busy && !tx_start) begin
+                             if (print_row == print_m - 1) begin
+                                 // End of Matrix -> Send ']'
+                                 tx_data <= 8'h5D; // ']'
+                                 tx_start <= 1;
+                                 print_state <= P_MATRIX_END;
+                             end else begin
+                                 // Next Row -> Send newline (or ;)
+                                 tx_data <= 8'h0A; // Newline
+                                 tx_start <= 1;
+                                 print_row <= print_row + 1;
+                                 print_col <= 0;
+                                 print_state <= P_READ;
+                             end
+                        end
+                    end
+                    P_MATRIX_END: begin
+                        if (!tx_busy && !tx_start) begin
+                            tx_data <= 8'h0A; // Final Newline
+                            tx_start <= 1;
+                            print_state <= P_DONE;
+                        end
+                    end
+                    P_DONE: begin
+                        // Wait for last char to send? 
+                        // Handled by outer state check
                     end
                 endcase
             end

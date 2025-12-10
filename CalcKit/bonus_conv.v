@@ -4,7 +4,6 @@ module bonus_conv (
     input wire clk,
     input wire rst_n,
     input wire start_conv,
-    input wire tx_ready, // Handshake from UART
     
     // Interface to Matrix Memory (Read Only)
     output reg [1:0]  mem_rd_slot,
@@ -202,25 +201,22 @@ module bonus_conv (
                 end
 
                 S_CALC_DONE: begin
-                    // Wait for UART to be ready
-                    if (tx_ready) begin
-                        // Output Result
-                        conv_res_data <= accumulator[15:0]; 
-                        conv_res_valid <= 1;
+                    // Output Result
+                    conv_res_data <= accumulator[15:0]; 
+                    conv_res_valid <= 1;
 
-                        // Move to next pixel
-                        if (out_c == 9) begin
-                            out_c <= 0;
-                            if (out_r == 7) begin
-                                state <= S_DONE;
-                            end else begin
-                                out_r <= out_r + 1;
-                                state <= S_CALC_INIT;
-                            end
+                    // Move to next pixel
+                    if (out_c == 9) begin
+                        out_c <= 0;
+                        if (out_r == 7) begin
+                            state <= S_DONE;
                         end else begin
-                            out_c <= out_c + 1;
+                            out_r <= out_r + 1;
                             state <= S_CALC_INIT;
                         end
+                    end else begin
+                        out_c <= out_c + 1;
+                        state <= S_CALC_INIT;
                     end
                 end
 

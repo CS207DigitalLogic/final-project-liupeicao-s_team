@@ -1,117 +1,62 @@
+
+
 `timescale 1ns / 1ps
 
 module Central_FSM (
-    input wire clk,                 // ç³»ç»Ÿæ—¶é’Ÿ
-    input wire rst_n,               // ç³»ç»Ÿå¤ä½ (Active Low)
-    input wire [2:0] sw,            // å¼€å…³è¾“å…¥ (SW[2:0])
-    input wire btn_c,               // ç¡®è®¤æŒ‰é”® (éœ€ä¸ºå•è„‰å†²ä¿¡å·)
+    input wire clk,                 // ÏµÍ³Ê±ÖÓ
+    input wire rst_n,               // ÏµÍ³¸´Î» (Active Low)
+    input wire [2:0] sw,            // ¿ª¹ØÊäÈë (SW[2:0])
+    input wire btn_c,               // È·ÈÏ°´¼ü (ÐèÎªµ¥Âö³åÐÅºÅ)
 
-    // --- UART Input (from cmd_parser) ---
-    input wire [15:0] number_out,
-    input wire number_valid,
+    // --- À´×Ô¸÷×ÓÄ£¿éµÄ×´Ì¬Ìø×ªÐÅºÅ (ÎÕÊÖÐÅºÅ) ---
+    input wire input_dim_done,      // INPUT_DIM -> INPUT_DATA: ½ÓÊÕ m,n Íê³É
+    input wire input_data_done,     // INPUT_DATA -> IDLE: ½ÓÊÕ m*n Êý¾ÝÍê³É
+    input wire gen_random_done,     // GEN_RANDOM -> IDLE: Ëæ»úÌî³äÍê³É
+    input wire bonus_done,          // BONUS_RUN -> IDLE: ¾í»ý¼°ÏÔÊ¾Íê³É
+    input wire display_id_conf,     // DISPLAY_WAIT -> DISPLAY_PRINT: È·ÈÏ¾ØÕó±àºÅ
+    input wire uart_tx_done,        // DISPLAY_PRINT -> IDLE: UART ·¢ËÍÍê³É
+    
+    // --- ¾ØÕóÔËËãÄ£Ê½ÐÅºÅ ---
+    input wire calc_mat_conf,       // CALC_SELECT_MAT -> CALC_CHECK: ÊäÈë¾ØÕóID²¢È·ÈÏ
+    input wire check_valid,         // CALC_CHECK -> CALC_EXEC: Î¬¶ÈÆ¥Åä (Valid)
+    input wire check_invalid,       // CALC_CHECK -> CALC_ERROR: Î¬¶È²»Æ¥Åä (Invalid)
+    input wire alu_done,            // CALC_EXEC -> CALC_DONE: ALU ¼ÆËã½áÊø
+    input wire result_display_done, // CALC_DONE -> IDLE: ÏÔÊ¾½á¹û²¢·µ»Ø
+    input wire error_timeout,       // CALC_ERROR -> CALC_SELECT_MAT: µ¹¼ÆÊ±½áÊø
 
-    // --- Submodule Status ---
-    input wire gen_done,
-    input wire alu_done,
-    input wire alu_error,
-    input wire conv_done,
-    input wire [15:0] conv_res_data,
-    input wire conv_res_valid,
-
-    // --- UART Output Control ---
-    output reg [7:0] tx_data,
-    output reg tx_start,
-    input wire tx_busy,
-
-    // --- Matrix Memory User Port Control ---
-    output reg [1:0] user_slot_idx,
-    output reg [2:0] user_row,
-    output reg [2:0] user_col,
-    output reg [15:0] user_data,
-    output reg user_we,
-    output reg [2:0] user_dim_m,
-    output reg [2:0] user_dim_n,
-    output reg user_dim_we,
-    input wire [15:0] user_rd_data, // Data read from memory for display
-
-    // --- Matrix Gen Control ---
-    output reg gen_start,
-    output reg [2:0] gen_target_m,
-    output reg [2:0] gen_target_n,
-    output reg [1:0] gen_target_slot,
-
-    // --- Matrix ALU Control ---
-    output reg alu_start,
-    output reg [2:0] alu_opcode,
-    output reg [15:0] alu_scalar,
-
-    // --- Bonus Conv Control ---
-    output reg conv_start,
-
-    // --- Debug / Status ---
+    // --- Êä³ö×´Ì¬£¬ÓÃÓÚ¿ØÖÆÊý¾ÝÍ¨Â· ---
     output reg [3:0] current_state
 );
 
-    // ============================================================
-    // Parameters & States
-    // ============================================================
+    // --- ×´Ì¬¶¨Òå (State Encoding) ---
     localparam STATE_IDLE           = 4'd0;
     
-    // Mode 000: Input
-    localparam STATE_INPUT_PARAM    = 4'd1;  // Get Slot, M, N
-    localparam STATE_INPUT_DATA     = 4'd2;  // Get M*N Data
+    // ÊäÈëÄ£Ê½
+    localparam STATE_INPUT_DIM      = 4'd1;  // ÊäÈëÎ¬¶È
+    localparam STATE_INPUT_DATA     = 4'd2;  // ÊäÈëÊý¾Ý
     
-    // Mode 001: Gen
-    localparam STATE_GEN_PARAM      = 4'd3;  // Get Slot, M, N
-    localparam STATE_GEN_WAIT       = 4'd4;  // Wait for Gen Done
+    // Ëæ»úÉú³ÉÄ£Ê½
+    localparam STATE_GEN_RANDOM     = 4'd3;  // Ëæ»úÉú³É
     
-    // Mode 010: Display
-    localparam STATE_DISPLAY_PARAM  = 4'd5;  // Get Slot
-    localparam STATE_DISPLAY_READ   = 4'd6;  // Read Mem
-    localparam STATE_DISPLAY_PRINT  = 4'd7;  // Send UART
+    // ¾í»ýÄ£Ê½ (Bonus)
+    localparam STATE_BONUS_RUN      = 4'd4;  // ¾í»ýÔËËã
     
-    // Mode 011: Calc
-    localparam STATE_CALC_PARAM     = 4'd8;  // Get Opcode (and Scalar)
-    localparam STATE_CALC_WAIT      = 4'd9;  // Wait for ALU Done
+    // Õ¹Ê¾Ä£Ê½
+    localparam STATE_DISPLAY_WAIT   = 4'd5;  // Ñ¡Ôñ¾ØÕóÕ¹Ê¾
+    localparam STATE_DISPLAY_PRINT  = 4'd6;  // UART Êä³ö
     
-    // Mode 100: Bonus
-    localparam STATE_BONUS_WAIT     = 4'd10; // Wait for Conv Done & Stream
-    
-    // Common UART Output States
-    localparam STATE_PRINT_NUM      = 4'd11; // Print a 16-bit number (dec/hex)
-    localparam STATE_PRINT_NEWLINE  = 4'd12; // Print \r\n
+    // ¾ØÕóÔËËãÄ£Ê½ (Calc Mode)
+    localparam STATE_CALC_SELECT_OP = 4'd7;  // Ñ¡ÔËËãÀàÐÍ
+    localparam STATE_CALC_SELECT_MAT= 4'd8;  // Ñ¡Ôñ²Ù×÷Êý
+    localparam STATE_CALC_CHECK     = 4'd9;  // ºÏ·¨ÐÔ¼ì²é
+    localparam STATE_CALC_EXEC      = 4'd10; // ¼ÆËãÖ´ÐÐ
+    localparam STATE_CALC_DONE      = 4'd11; // ¼ÆËãÍê³É
+    localparam STATE_CALC_ERROR     = 4'd12; // ´íÎóµ¹¼ÆÊ±
 
+    // ÄÚ²¿×´Ì¬¼Ä´æÆ÷
     reg [3:0] next_state;
-    reg [3:0] return_state; // For subroutine calls (Printing)
 
-    // ============================================================
-    // Internal Registers
-    // ============================================================
-    // Parameter Buffer
-    reg [1:0] param_count;
-    reg [1:0] target_slot;
-    reg [2:0] target_m, target_n;
-    reg [15:0] target_scalar;
-    reg [2:0] target_op;
-    
-    // Data Counter
-    reg [7:0] data_counter;
-    reg [7:0] total_elements;
-    
-    // Printing / ASCII Conversion
-    reg [15:0] print_value;
-    reg [3:0] digit_buf[0:4];
-    reg [2:0] digit_idx;
-    reg [2:0] digit_total;
-    reg is_negative;
-    
-    // Conv Output Buffer
-    reg [15:0] conv_data_buf;
-    reg conv_data_ready;
-
-    // ============================================================
-    // State Update
-    // ============================================================
+    // --- Ê±ÐòÂß¼­£º×´Ì¬¸üÐÂ ---
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             current_state <= STATE_IDLE;
@@ -120,319 +65,103 @@ module Central_FSM (
         end
     end
 
-    // ============================================================
-    // FSM Logic
-    // ============================================================
-    
-    // Helper Function: Digit to ASCII
-    function [7:0] digit_to_ascii;
-        input [3:0] digit;
-        begin
-            digit_to_ascii = digit + 8'h30;
-        end
-    endfunction
+    // --- ×éºÏÂß¼­£ºÏÂÒ»×´Ì¬ÅÐ¶Ï ---
+    always @(*) begin
+        // Ä¬ÈÏ±£³Öµ±Ç°×´Ì¬£¬·ÀÖ¹ latch
+        next_state = current_state;
 
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            next_state <= STATE_IDLE;
-            user_we <= 0;
-            user_dim_we <= 0;
-            gen_start <= 0;
-            alu_start <= 0;
-            conv_start <= 0;
-            tx_start <= 0;
-            param_count <= 0;
-            data_counter <= 0;
-            
-            // Default Outputs
-            user_slot_idx <= 0;
-            user_row <= 0;
-            user_col <= 0;
-            
-        end else begin
-            // Auto-reset pulses
-            user_we <= 0;
-            user_dim_we <= 0;
-            gen_start <= 0;
-            alu_start <= 0;
-            conv_start <= 0;
-            tx_start <= 0;
-
-            case (current_state)
-                // ------------------------------------------------
-                // IDLE: Wait for Button
-                // ------------------------------------------------
-                STATE_IDLE: begin
-                    param_count <= 0;
-                    data_counter <= 0;
-                    if (btn_c) begin
-                        case (sw)
-                            3'b000: next_state <= STATE_INPUT_PARAM;
-                            3'b001: next_state <= STATE_GEN_PARAM;
-                            3'b010: next_state <= STATE_DISPLAY_PARAM;
-                            3'b011: next_state <= STATE_CALC_PARAM;
-                            3'b100: begin
-                                conv_start <= 1; // Start immediately for Bonus
-                                next_state <= STATE_BONUS_WAIT;
-                            end
-                            default: next_state <= STATE_IDLE;
-                        endcase
-                    end
+        case (current_state)
+            // 1. Ö÷²Ëµ¥×´Ì¬ (IDLE)
+            STATE_IDLE: begin
+                if (btn_c) begin
+                    case (sw)
+                        3'b000: next_state = STATE_INPUT_DIM;
+                        3'b001: next_state = STATE_GEN_RANDOM;
+                        3'b100: next_state = STATE_BONUS_RUN;
+                        3'b010: next_state = STATE_DISPLAY_WAIT;
+                        3'b011: next_state = STATE_CALC_SELECT_OP;
+                        default: next_state = STATE_IDLE;
+                    endcase
                 end
+            end
 
-                // ------------------------------------------------
-                // MODE 0: INPUT (Slot, M, N -> Data)
-                // ------------------------------------------------
-                STATE_INPUT_PARAM: begin
-                    if (number_valid) begin
-                        case (param_count)
-                            0: begin target_slot <= number_out[1:0]; param_count <= 1; end
-                            1: begin target_m <= number_out[2:0]; param_count <= 2; end
-                            2: begin 
-                                target_n <= number_out[2:0]; 
-                                total_elements <= number_out[2:0] * target_m; // Calc total
-                                
-                                // Update Dimensions in Mem
-                                user_slot_idx <= target_slot;
-                                user_dim_m <= target_m;
-                                user_dim_n <= number_out[2:0];
-                                user_dim_we <= 1;
-                                
-                                user_row <= 0;
-                                user_col <= 0;
-                                next_state <= STATE_INPUT_DATA;
-                            end
-                        endcase
-                    end
-                end
+            // 2. Êý¾ÝÊäÈëÁ÷³Ì
+            STATE_INPUT_DIM: begin
+                if (input_dim_done) 
+                    next_state = STATE_INPUT_DATA;
+            end
+            STATE_INPUT_DATA: begin
+                if (input_data_done) 
+                    next_state = STATE_IDLE;
+            end
 
-                STATE_INPUT_DATA: begin
-                    if (number_valid) begin
-                        // Write to Memory
-                        user_slot_idx <= target_slot;
-                        user_data <= number_out;
-                        user_row <= user_row; // Current row
-                        user_col <= user_col; // Current col
-                        user_we <= 1;
+            // 3. Ëæ»úÉú³ÉÁ÷³Ì
+            STATE_GEN_RANDOM: begin
+                if (gen_random_done) 
+                    next_state = STATE_IDLE;
+            end
 
-                        // Update Counters
-                        if (user_col == target_n - 1) begin
-                            user_col <= 0;
-                            user_row <= user_row + 1;
-                        end else begin
-                            user_col <= user_col + 1;
-                        end
+            // 4. ¾í»ýÔËËã (Bonus)
+            STATE_BONUS_RUN: begin
+                if (bonus_done) 
+                    next_state = STATE_IDLE;
+            end
 
-                        data_counter <= data_counter + 1;
-                        if (data_counter + 1 >= total_elements) begin
-                            next_state <= STATE_IDLE;
-                        end
-                    end
-                end
+            // 5. ¾ØÕóÕ¹Ê¾Á÷³Ì
+            STATE_DISPLAY_WAIT: begin
+                if (display_id_conf) 
+                    next_state = STATE_DISPLAY_PRINT;
+            end
+            STATE_DISPLAY_PRINT: begin
+                if (uart_tx_done) 
+                    next_state = STATE_IDLE;
+            end
 
-                // ------------------------------------------------
-                // MODE 1: GEN (Slot, M, N -> Start)
-                // ------------------------------------------------
-                STATE_GEN_PARAM: begin
-                    if (number_valid) begin
-                        case (param_count)
-                            0: begin target_slot <= number_out[1:0]; param_count <= 1; end
-                            1: begin target_m <= number_out[2:0]; param_count <= 2; end
-                            2: begin 
-                                target_n <= number_out[2:0]; 
-                                // Trigger Gen
-                                gen_target_slot <= target_slot;
-                                gen_target_m <= target_m;
-                                gen_target_n <= number_out[2:0];
-                                gen_start <= 1;
-                                next_state <= STATE_GEN_WAIT;
-                            end
-                        endcase
-                    end
-                end
+            // 6. ¾ØÕóÔËËãÄ£Ê½ (Calc Mode)
+            STATE_CALC_SELECT_OP: begin
+                // Í¼ÖÐÎª "°´ÏÂ Btn_C" Ìø×ªµ½Ñ¡Êý
+                if (btn_c) 
+                    next_state = STATE_CALC_SELECT_MAT;
+            end
 
-                STATE_GEN_WAIT: begin
-                    if (gen_done) begin
-                        next_state <= STATE_IDLE;
-                    end
-                end
+            STATE_CALC_SELECT_MAT: begin
+                if (calc_mat_conf) 
+                    next_state = STATE_CALC_CHECK;
+            end
 
-                // ------------------------------------------------
-                // MODE 2: DISPLAY (Slot -> Print)
-                // ------------------------------------------------
-                STATE_DISPLAY_PARAM: begin
-                    if (number_valid) begin
-                        target_slot <= number_out[1:0];
-                        
-                        // Setup for Reading
-                        user_slot_idx <= number_out[1:0];
-                        // Note: We don't know M/N here easily unless we read them or user inputs them.
-                        // The Matrix Mem doesn't expose "Dim Read" on User Port easily (only on ALU Port).
-                        // User Port 'user_dim_m' is an INPUT.
-                        // However, Port 2 (ALU) outputs 'alu_current_m/n'.
-                        // For simplicity, let's assume User Inputs M/N again for display 
-                        // OR we blindly read 8x8?
-                        // Wait, README says "User sets slot...".
-                        // Let's assume we require M, N input for display too, to know how much to print.
-                        param_count <= 1; 
-                    end
-                    else if (param_count == 1 && number_valid) begin
-                        target_m <= number_out[2:0];
-                        param_count <= 2;
-                    end
-                    else if (param_count == 2 && number_valid) begin
-                        target_n <= number_out[2:0];
-                        total_elements <= number_out[2:0] * target_m;
-                        user_row <= 0;
-                        user_col <= 0;
-                        data_counter <= 0;
-                        next_state <= STATE_DISPLAY_READ;
-                    end
-                end
+            STATE_CALC_CHECK: begin
+                if (check_valid) 
+                    next_state = STATE_CALC_EXEC;
+                else if (check_invalid) 
+                    next_state = STATE_CALC_ERROR;
+            end
 
-                STATE_DISPLAY_READ: begin
-                    // Setup Read Address
-                    user_slot_idx <= target_slot;
-                    user_row <= user_row;
-                    user_col <= user_col;
-                    // Wait one cycle for memory access? (Sync read)
-                    // Assuming 'user_rd_data' is available next cycle.
-                    // We need a small wait state or just proceed if Mem is combinational read (unlikely).
-                    // Standard Block RAM is sync read.
-                    // Let's add a dummy state or reuse this state with a flag.
-                    // For now, assuming we stay here 1 cycle then move to PRINT.
-                    // Actually, let's jump to PRINT_NUM, and PRINT_NUM will latch data.
-                    next_state <= STATE_DISPLAY_PRINT;
-                end
+            STATE_CALC_EXEC: begin
+                if (alu_done) 
+                    next_state = STATE_CALC_DONE;
+            end
 
-                STATE_DISPLAY_PRINT: begin
-                    // Data should be ready at user_rd_data
-                    print_value <= user_rd_data;
-                    return_state <= STATE_DISPLAY_READ; // Return here to increment
-                    
-                    // Jump to Print Routine
-                    // We need a specialized state for incrementing after print
-                    // Let's use a flag to distinguish "Just Entered" vs "Returned".
-                    // Simplification: Inline the increment logic after print returns.
-                    // Actually, let's go to STATE_PRINT_NUM.
-                    // When STATE_PRINT_NUM finishes, it needs to know where to go.
-                    // We'll define a specific return state: STATE_DISPLAY_NEXT.
-                    return_state <= 4'd13; // STATE_DISPLAY_NEXT (defined below)
-                    next_state <= STATE_PRINT_NUM;
-                end
-                
-                // ------------------------------------------------
-                // MODE 3: CALC (Opcode, Scalar -> Start)
-                // ------------------------------------------------
-                STATE_CALC_PARAM: begin
-                    if (number_valid) begin
-                        case (param_count)
-                            0: begin 
-                                target_op <= number_out[2:0]; 
-                                if (number_out[2:0] == 3'b011) // OP_SCA
-                                    param_count <= 1;
-                                else begin
-                                    // Start ALU
-                                    alu_opcode <= number_out[2:0];
-                                    alu_scalar <= 0;
-                                    alu_start <= 1;
-                                    next_state <= STATE_CALC_WAIT;
-                                end
-                            end
-                            1: begin
-                                target_scalar <= number_out;
-                                // Start ALU with Scalar
-                                alu_opcode <= target_op;
-                                alu_scalar <= number_out;
-                                alu_start <= 1;
-                                next_state <= STATE_CALC_WAIT;
-                            end
-                        endcase
-                    end
-                end
+            STATE_CALC_DONE: begin
+                // ÏÔÊ¾½á¹û²¢·µ»Ø IDLE (×¢ÒâÕâÀïÊÇ´ó»Ø»·»Øµ½ IDLE)
+                if (result_display_done) 
+                    next_state = STATE_IDLE;
+            end
 
-                STATE_CALC_WAIT: begin
-                    if (alu_done || alu_error) begin
-                        // Maybe print "Done" or Error code?
-                        next_state <= STATE_IDLE;
-                    end
-                end
+            STATE_CALC_ERROR: begin
+                // µ¹¼ÆÊ±½áÊø£¬ÖØÐÂÊäÈë (»Øµ½ SELECT_MAT)
+                if (error_timeout) 
+                    next_state = STATE_CALC_SELECT_MAT;
+                // Ö§³Öµ¹¼ÆÊ±ÄÚÖØÐÂÈ·ÈÏ (Early Retry)
+                // Èç¹ûÓÃ»§ÔÚµ¹¼ÆÊ±ÆÚ¼ä°´ÏÂÁËÈ·ÈÏ¼ü£¬ÎÒÃÇÈÏÎªËûÖØÐÂÖ¸¶¨ÁË¾ØÕó
+                // Ìø×ª»Ø CHECK ½øÐÐ¼ì²é (Ç°ÌáÊÇ top.v ÔÚ ERROR ×´Ì¬ÏÂÔÊÐíÐÞ¸Ä¾ØÕóÑ¡Ôñ²¢²úÉú calc_mat_conf ÐÅºÅ)
+                // µ« calc_mat_conf ÊÇ SELECT_MAT ×´Ì¬²úÉúµÄ¡£
+                // ÎÒÃÇ¿ÉÒÔÔÚ ERROR ×´Ì¬ÏÂ¸´ÓÃ calc_mat_conf ÐÅºÅ×÷ÎªÌø×ªÌõ¼þ¡£
+                else if (calc_mat_conf)
+                    next_state = STATE_CALC_CHECK;
+            end
 
-                // ------------------------------------------------
-                // MODE 4: BONUS (Stream Output)
-                // ------------------------------------------------
-                STATE_BONUS_WAIT: begin
-                    if (conv_res_valid) begin
-                        print_value <= conv_res_data;
-                        return_state <= STATE_BONUS_WAIT; // Come back for more
-                        next_state <= STATE_PRINT_NUM;
-                    end
-                    if (conv_done) begin
-                        next_state <= STATE_IDLE;
-                    end
-                end
-
-                // ------------------------------------------------
-                // SUBROUTINE: PRINT NUM (16-bit Decimal)
-                // ------------------------------------------------
-                STATE_PRINT_NUM: begin
-                    // 1. Binary to BCD (Simplified: Repeated subtraction or similar)
-                    // Since we can't do complex division in one cycle, we use a multi-cycle approach 
-                    // OR just print Hex for simplicity? User guide implies matrix values.
-                    // Let's implement a simple Hex printer for reliability first, 
-                    // OR copy the Top.v logic which did decimal.
-                    // Top.v used a lookup/mod? No, it used `digit_buf`.
-                    // I'll implement Hex Printing: "H" + 4 digits + Space.
-                    // Example: "1A2B "
-                    
-                    if (!tx_busy) begin
-                        case (param_count) // Reuse param_count for print steps
-                            0: begin tx_data <= " "; tx_start <= 1; param_count <= 1; end
-                            1: begin tx_data <= digit_to_hex(print_value[15:12]); tx_start <= 1; param_count <= 2; end
-                            2: begin tx_data <= digit_to_hex(print_value[11:8]);  tx_start <= 1; param_count <= 3; end
-                            3: begin tx_data <= digit_to_hex(print_value[7:4]);   tx_start <= 1; param_count <= 4; end
-                            4: begin tx_data <= digit_to_hex(print_value[3:0]);   tx_start <= 1; param_count <= 5; end
-                            5: begin 
-                                next_state <= return_state; 
-                                param_count <= 0; 
-                            end
-                        endcase
-                    end
-                end
-
-                // ------------------------------------------------
-                // STATE_DISPLAY_NEXT: Incrementer for Display Loop
-                // ------------------------------------------------
-                4'd13: begin
-                    // Increment Col/Row
-                    if (user_col == target_n - 1) begin
-                        user_col <= 0;
-                        user_row <= user_row + 1;
-                        // Print Newline?
-                        // For now just space separated.
-                    end else begin
-                        user_col <= user_col + 1;
-                    end
-
-                    data_counter <= data_counter + 1;
-                    if (data_counter + 1 >= total_elements) begin
-                        next_state <= STATE_IDLE;
-                    end else begin
-                        next_state <= STATE_DISPLAY_READ;
-                    end
-                end
-
-                default: next_state <= STATE_IDLE;
-            endcase
-        end
+            default: next_state = STATE_IDLE;
+        endcase
     end
-    
-    function [7:0] digit_to_hex;
-        input [3:0] d;
-        begin
-            if (d < 10) digit_to_hex = d + "0";
-            else digit_to_hex = d - 10 + "A";
-        end
-    endfunction
 
 endmodule
