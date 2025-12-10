@@ -9,8 +9,8 @@ module Seg_Driver (
     input wire [7:0] in_count,      // 当前输入计数
     input wire [2:0] alu_opcode,    // ALU Opcode for display
     input wire [31:0] bonus_cycles, // Bonus 周期数
-    
-    output reg [7:0] seg_out,       // 段选 (Active High)
+    output reg [7:0] seg_out0,  
+    output reg [7:0] seg_out1,       // 段选 (Active High)
     output reg [7:0] seg_an         // 位选 (Active High)
 );
 
@@ -93,8 +93,8 @@ module Seg_Driver (
     // =========================================================================
     always @(*) begin
         // Default Clean
-        digit_map[7] = CHAR_BLANK; digit_map[6] = CHAR_BLANK; digit_map[5] = CHAR_BLANK; digit_map[4] = CHAR_BLANK;
-        digit_map[3] = CHAR_BLANK; digit_map[2] = CHAR_BLANK; digit_map[1] = CHAR_BLANK; digit_map[0] = CHAR_BLANK;
+        // digit_map[7] = CHAR_BLANK; digit_map[6] = CHAR_BLANK; digit_map[5] = CHAR_BLANK; digit_map[4] = CHAR_BLANK;
+        // digit_map[3] = CHAR_BLANK; digit_map[2] = CHAR_BLANK; digit_map[1] = CHAR_BLANK; digit_map[0] = CHAR_BLANK;
 
         if (current_state == STATE_CALC_ERROR) begin
             // "Err XX" (XX = time_left)
@@ -204,34 +204,38 @@ module Seg_Driver (
         if (!rst_n) begin
             scan_cnt <= 0;
             seg_an <= 8'h00; // Reset All Off (Active High)
-            seg_out <= 8'h00; // Reset All Off
+            seg_out0 <= 8'h00; // Reset All Off
+            seg_out1 <= 8'h00; 
         end else begin
             scan_cnt <= scan_cnt + 1;
-            
+            seg_an=8'b1000_0001;
+            seg_out0=digit_map[0];
+            seg_out1=digit_map[7];
             // Scan Speed: ~95Hz (100MHz / 2^20 * 8 is slow, 2^17 is better)
             // Use blocking assignments in always block for next state or just standard sync update
             // Here using the scan_cnt directly to derive select
         end
     end
-    
-    wire [2:0] scan_sel = scan_cnt[19:17]; 
 
-    always @(*) begin
-        // Anode Control (Active High)
-        // 0000_0001, 0000_0010, ...
-        case(scan_sel)
-            3'd0: seg_an = 8'b0000_0001;
-            3'd1: seg_an = 8'b0000_0010;
-            3'd2: seg_an = 8'b0000_0100;
-            3'd3: seg_an = 8'b0000_1000;
-            3'd4: seg_an = 8'b0001_0000;
-            3'd5: seg_an = 8'b0010_0000;
-            3'd6: seg_an = 8'b0100_0000;
-            3'd7: seg_an = 8'b1000_0000;
-        endcase
+
+    // wire [2:0] scan_sel = scan_cnt[19:17]; 
+    // always @(*) begin
+    //     // Anode Control (Active High)
+    //     // 0000_0001, 0000_0010, ...
+    //     case(scan_sel)
+    //         3'd0: seg_an = 8'b0000_0001;
+    //         3'd1: seg_an = 8'b0000_0010;
+    //         3'd2: seg_an = 8'b0000_0100;
+    //         3'd3: seg_an = 8'b0000_1000;
+    //         3'd4: seg_an = 8'b0001_0000;
+    //         3'd5: seg_an = 8'b0010_0000;
+    //         3'd6: seg_an = 8'b0100_0000;
+    //         3'd7: seg_an = 8'b1000_0000;
+    //     endcase
         
-        // Segment Output Control (Active High)
-        seg_out = digit_map[scan_sel];
-    end
+    //     // Segment Output Control (Active High)
+    //     seg_out = digit_map[scan_sel];
+    // end
+    
 
 endmodule

@@ -297,10 +297,11 @@ module top (
         .in_count(in_count),
         .alu_opcode(alu_opcode),
         .bonus_cycles(bonus_cycles),
-        .seg_out(seg_data_0_pin),
+        .seg_out0(seg_data_0_pin),
+        .seg_out1(seg_data_1_pin),
         .seg_an(seg_cs_pin)
     );
-    assign seg_data_1_pin = 8'hFF; // Unused
+    
 
     // ============================================================
     // 7. Logic Implementation (The "Brain" Wiring)
