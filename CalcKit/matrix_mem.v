@@ -25,6 +25,11 @@ module matrix_mem (
     // New: User Dims Output
     output wire [2:0] user_current_m,
     output wire [2:0] user_current_n,
+    
+    // Direct Dimension Access for Checker
+    output wire [2:0] dim_a_m, output wire [2:0] dim_a_n,
+    output wire [2:0] dim_b_m, output wire [2:0] dim_b_n,
+    output wire [2:0] dim_c_m, output wire [2:0] dim_c_n,
 
     input wire [1:0]  alu_wr_slot,
     input wire [2:0]  alu_wr_row,
@@ -89,6 +94,11 @@ module matrix_mem (
     // User Dims
     assign user_current_m = dims_m[user_slot_idx];
     assign user_current_n = dims_n[user_slot_idx];
+    
+    // Direct Access
+    assign dim_a_m = dims_m[0]; assign dim_a_n = dims_n[0];
+    assign dim_b_m = dims_m[1]; assign dim_b_n = dims_n[1];
+    assign dim_c_m = dims_m[2]; assign dim_c_n = dims_n[2];
 
     // 【新增】Asynchronous Read for User
     // 当 user_we 为 0 时，user_rd_data 输出当前地址的数据

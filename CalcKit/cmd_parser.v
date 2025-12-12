@@ -1,14 +1,14 @@
 module cmd_parser (
     input  wire       clk,
     input  wire       rst_n,
-    input  wire [7:0] rx_data,      // UART ÊÕµ½µÄÒ»¸ö×Ö½Ú£¨ASCII£©
-    input  wire       rx_valid,     // ¶ÔÓ¦ data ÓÐÐ§µ¥ÅÄ
-    output reg [15:0] number_out,   // Êä³ö 0-999
-    output reg        number_valid  // µ¥ÅÄ£¬ÓÐÐÂ number_out
+    input  wire [7:0] rx_data,      // UART ï¿½Õµï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ö½Ú£ï¿½ASCIIï¿½ï¿½
+    input  wire       rx_valid,     // ï¿½ï¿½Ó¦ data ï¿½ï¿½Ð§ï¿½ï¿½ï¿½ï¿½
+    output reg [15:0] number_out,   // ï¿½ï¿½ï¿½ 0-999
+    output reg        number_valid  // ï¿½ï¿½ï¿½Ä£ï¿½ï¿½ï¿½ï¿½ï¿½ number_out
 );
 
-    reg [15:0] number_buffer; // ÓÃÓÚÀÛ»ýÊý×Ö
-    reg        parsing_in_progress; // ±êÖ¾ÊÇ·ñÕýÔÚ½âÎöÊý×Ö
+    reg [15:0] number_buffer; // ï¿½ï¿½ï¿½ï¿½ï¿½Û»ï¿½ï¿½ï¿½ï¿½ï¿½
+    reg        parsing_in_progress; // ï¿½ï¿½Ö¾ï¿½Ç·ï¿½ï¿½ï¿½ï¿½Ú½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
     function [3:0] ascii_to_digit;
         input [7:0] ascii_char;
@@ -24,7 +24,7 @@ module cmd_parser (
                 8'h37: ascii_to_digit = 4'd7;
                 8'h38: ascii_to_digit = 4'd8;
                 8'h39: ascii_to_digit = 4'd9;
-                default: ascii_to_digit = 4'hF; // ÎÞÐ§
+                default: ascii_to_digit = 4'hF; // ï¿½ï¿½Ð§
             endcase
         end
     endfunction
@@ -34,25 +34,25 @@ module cmd_parser (
             number_out          <= 16'd0;
             number_valid        <= 1'b0;
             number_buffer       <= 16'd0;
-            parsing_in_progress <= 1'b0; // ¸´Î»×´Ì¬
+            parsing_in_progress <= 1'b0; // ï¿½ï¿½Î»×´Ì¬
         end else begin
-            number_valid <= 1'b0; // Ä¬ÈÏÀ­µÍ
+            number_valid <= 1'b0; // Ä¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
             if (rx_valid) begin
-                if (ascii_to_digit(rx_data) != 4'hF) begin // ÊÕµ½µÄÊÇÊý×Ö×Ö·û
-                    // ÀÛ¼ÓÊý×Ö
+                if (ascii_to_digit(rx_data) != 4'hF) begin // ï¿½Õµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö·ï¿½
+                    // ï¿½Û¼ï¿½ï¿½ï¿½ï¿½ï¿½
                     number_buffer <= (number_buffer * 10) + ascii_to_digit(rx_data);
-                    parsing_in_progress <= 1'b1; // ±ê¼ÇÕýÔÚ½âÎöÊý×Ö
-                end else if ( (rx_data == 8'h0D || rx_data == 8'h20 || rx_data == 8'h0A) && parsing_in_progress ) begin // ÊÕµ½·Ö¸ô·û (»Ø³µ¡¢»»ÐÐ»ò¿Õ¸ñ) ÇÒÖ®Ç°ÓÐÊý×ÖÔÚÀÛ»ý
-                    // ½«ÀÛ»ýµÄÊý×ÖÊä³ö
+                    parsing_in_progress <= 1'b1; // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+                end else if ( (rx_data == 8'h0D || rx_data == 8'h20 || rx_data == 8'h0A) && parsing_in_progress ) begin // ï¿½Õµï¿½ï¿½Ö¸ï¿½ï¿½ï¿½ (ï¿½Ø³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð»ï¿½Õ¸ï¿½) ï¿½ï¿½Ö®Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Û»ï¿½
+                    // ï¿½ï¿½ï¿½Û»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                     number_out          <= number_buffer;
-                    number_valid        <= 1'b1; // ±ê¼ÇÊý×ÖÓÐÐ§
+                    number_valid        <= 1'b1; // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð§
                     
-                    // ¸´Î»ÎªÏÂÒ»´Î½âÎö×ö×¼±¸
+                    // ï¿½ï¿½Î»Îªï¿½ï¿½Ò»ï¿½Î½ï¿½ï¿½ï¿½ï¿½ï¿½×¼ï¿½ï¿½
                     number_buffer       <= 16'd0;
                     parsing_in_progress <= 1'b0;
-                end else begin // ÊÕµ½ÆäËû·ÇÊý×Ö×Ö·û£¬»òÕßÔÚÃ»ÓÐÀÛ»ýÊý×ÖÊ±ÊÕµ½·Ö¸ô·û
-                    // Çå³ý×´Ì¬£¬·ÀÖ¹´íÎóÀÛ»ý
+                end else begin // ï¿½Õµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½Û»ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½Õµï¿½ï¿½Ö¸ï¿½ï¿½ï¿½
+                    // ï¿½ï¿½ï¿½×´Ì¬ï¿½ï¿½ï¿½ï¿½Ö¹ï¿½ï¿½ï¿½ï¿½ï¿½Û»ï¿½
                     number_buffer       <= 16'd0;
                     parsing_in_progress <= 1'b0;
                 end

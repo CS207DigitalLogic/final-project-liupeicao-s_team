@@ -8,6 +8,8 @@ module matrix_alu (
     input wire        start,
     input wire [2:0]  opcode,      
     input wire [15:0] scalar_val,  
+    input wire [1:0]  slot_a_idx, // User selected slot A
+    input wire [1:0]  slot_b_idx, // User selected slot B
     output reg        done,        
     output reg        error,       
 
@@ -37,8 +39,6 @@ module matrix_alu (
     localparam OP_SCA = 3'b011;
     localparam OP_TRA = 3'b100;
 
-    localparam SLOT_A = 2'd0;
-    localparam SLOT_B = 2'd1;
     localparam SLOT_C = 2'd2;
 
     // States
@@ -217,17 +217,17 @@ module matrix_alu (
     // Combinational Logic: Read Address Control
     // ============================================================
     always @(*) begin
-        mem_rd_slot = SLOT_A;
+        mem_rd_slot = slot_a_idx;
         mem_rd_row = 0;
         mem_rd_col = 0;
 
         case (state)
-            S_IDLE:      mem_rd_slot = SLOT_A;
-            S_GET_DIM_A: mem_rd_slot = SLOT_A; // Keep pointing to A
-            S_GET_DIM_B: mem_rd_slot = SLOT_B; // Point to B
+            S_IDLE:      mem_rd_slot = slot_a_idx;
+            S_GET_DIM_A: mem_rd_slot = slot_a_idx; // Keep pointing to A
+            S_GET_DIM_B: mem_rd_slot = slot_b_idx; // Point to B
 
             S_READ_OP1: begin
-                mem_rd_slot = SLOT_A;
+                mem_rd_slot = slot_a_idx;
                 if (opcode == OP_TRA) begin
                     mem_rd_row = j; // Transpose: read A[j][i]
                     mem_rd_col = i;
@@ -241,13 +241,13 @@ module matrix_alu (
             end
 
             S_READ_OP2: begin
-                mem_rd_slot = SLOT_B;
+                mem_rd_slot = slot_b_idx;
                 mem_rd_row = i; 
                 mem_rd_col = j;
             end
 
             S_MAT_MUL_ACC: begin
-                mem_rd_slot = SLOT_B;
+                mem_rd_slot = slot_b_idx;
                 mem_rd_row = k; // Mul: read B[k][j]
                 mem_rd_col = j;
             end

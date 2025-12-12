@@ -123,35 +123,19 @@ module tb_top;
         
         // 2. Send Matrix A (2x2)
         $display("\n[Step 2] Sending Matrix A via UART");
+        // SW[1:0] = 00 for Slot A
+        sw_pin[1:0] = 2'b00;
         send_cmd(2); send_cmd(2); // M, N
         send_cmd(10); send_cmd(20);
         send_cmd(30); send_cmd(40);
         
         // Wait for INPUT_DATA state to finish (Logic automatically waits for count)
-        // We need to send B immediately after A?
-        // No, FSM goes INPUT_DIM -> INPUT_DATA -> IDLE.
-        // So we need to re-enter INPUT mode for B?
-        // The original `top.v` logic chained A->B->Op.
-        // The `Central_FSM` is modal. 
-        // `INPUT` mode takes ONE matrix (based on current logic, it writes to Slot A always?).
-        // Wait, my `top.v` rewrite:
-        // Case 2 (INPUT_DATA): `mux_user_slot = 0;` (Always Slot A).
-        // This is a limitation of the current FSM/Top integration.
-        // To support Slot B input, we need a mechanism to toggle the target slot.
-        // Architecture Doc says: "User selects Matrix ID".
-        // Ah, `INPUT_DIM` state doesn't have a slot argument from FSM.
-        // Maybe `sw[4:3]` selects slot during `INPUT` mode?
-        // The Architecture Doc says: `sw[4:0]` used for data/param setting.
-        // Let's Update `top.v` logic quickly to use `sw` for slot selection during INPUT.
-        
-        // NOTE: I will pause simulation script here to fix `top.v` slot selection logic first.
-        // But let's finish the script assuming I fixed it.
         
         // 3. Enter INPUT Mode for Matrix B
         #1000000;
         $display("\n[Step 3] Enter INPUT Mode for Matrix B (SW=000, Slot=1)");
         sw_pin[7:5] = 3'b000; // Input Mode
-        sw_pin[1:0] = 2'd1;   // Select Slot 1 (B) - Assuming I implement this!
+        sw_pin[1:0] = 2'd1;   // Select Slot 1 (B)
         press_btn_c();
         
         send_cmd(2); send_cmd(2);
@@ -172,6 +156,9 @@ module tb_top;
         
         // 6. Confirm Mat (Default A, B)
         $display("\n[Step 6] Confirm Matrices (Default A, B)");
+        // Need to set SW[1:0] for A and SW[3:2] for B
+        sw_pin[1:0] = 2'd0; // A
+        sw_pin[3:2] = 2'd1; // B
         press_btn_c(); // -> CHECK -> EXEC -> DONE -> PRINT
         
         // Wait for Result Print
@@ -188,6 +175,8 @@ module tb_top;
         sw_pin[2:0] = 3'b001; // SUB
         $display("[TB Info] Selecting SUB (001)");
         press_btn_c(); // -> CALC_SELECT_MAT
+        sw_pin[1:0] = 2'd0; // A
+        sw_pin[3:2] = 2'd1; // B
         press_btn_c(); // -> CHECK -> EXEC -> DONE
         #50000000;
 
@@ -197,6 +186,8 @@ module tb_top;
         sw_pin[2:0] = 3'b010; // MUL
         $display("[TB Info] Selecting MUL (010)");
         press_btn_c(); // -> CALC_SELECT_MAT
+        sw_pin[1:0] = 2'd0; // A
+        sw_pin[3:2] = 2'd1; // B
         press_btn_c(); // -> CHECK -> EXEC -> DONE
         #50000000;
 
@@ -206,6 +197,7 @@ module tb_top;
         sw_pin[2:0] = 3'b011; // SCA
         $display("[TB Info] Selecting SCA (011)");
         press_btn_c(); // -> CALC_SELECT_MAT
+        sw_pin[1:0] = 2'd0; // A
         
         // Set Scalar Value on SW (Using full 8 bits or lower bits? FSM uses sw_pin directly)
         // In FSM: alu_scalar <= {8'b0, sw_pin};
@@ -236,6 +228,7 @@ module tb_top;
         sw_pin[2:0] = 3'b100; // TRA
         $display("[TB Info] Selecting TRA (100)");
         press_btn_c(); // -> CALC_SELECT_MAT
+        sw_pin[1:0] = 2'd0; // A
         press_btn_c(); // -> CHECK -> EXEC -> DONE
         #50000000;
 

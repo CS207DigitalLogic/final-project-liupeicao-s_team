@@ -129,6 +129,8 @@ module top (
     wire alu_wr_we, alu_dim_we;
     wire [2:0] alu_res_m, alu_res_n;
 
+    wire [2:0] dim_a_m, dim_a_n, dim_b_m, dim_b_n, dim_c_m, dim_c_n;
+
     matrix_mem u_mem (
         .clk(clk), .rst_n(rst_n),
         
@@ -152,6 +154,10 @@ module top (
         .alu_current_n(alu_cur_n),
         .user_current_m(print_m), // Hook up for dynamic printing
         .user_current_n(print_n), // Hook up for dynamic printing
+        
+        .dim_a_m(dim_a_m), .dim_a_n(dim_a_n),
+        .dim_b_m(dim_b_m), .dim_b_n(dim_b_n),
+        .dim_c_m(dim_c_m), .dim_c_n(dim_c_n),
         
         .alu_wr_slot(alu_wr_slot),
         .alu_wr_row(alu_wr_row),
@@ -195,6 +201,7 @@ module top (
     matrix_alu u_alu (
         .clk(clk), .rst_n(rst_n),
         .start(alu_start), .opcode(alu_opcode), .scalar_val(alu_scalar),
+        .slot_a_idx(sel_slot_a), .slot_b_idx(sel_slot_b),
         .done(alu_done), .error(alu_error),
         // Mem Interface
         .mem_rd_slot(alu_rd_slot), .mem_rd_row(alu_rd_row), .mem_rd_col(alu_rd_col),
@@ -300,6 +307,42 @@ module top (
 
     // --- 7.4 Main Control Logic ---
     
+    // Check Logic
+    reg [2:0] cur_dim_a_m, cur_dim_a_n;
+    reg [2:0] cur_dim_b_m, cur_dim_b_n;
+    
+    always @(*) begin
+        case(sel_slot_a)
+            0: begin cur_dim_a_m = dim_a_m; cur_dim_a_n = dim_a_n; end
+            1: begin cur_dim_a_m = dim_b_m; cur_dim_a_n = dim_b_n; end
+            2: begin cur_dim_a_m = dim_c_m; cur_dim_a_n = dim_c_n; end
+            default: begin cur_dim_a_m = 0; cur_dim_a_n = 0; end
+        endcase
+        case(sel_slot_b)
+            0: begin cur_dim_b_m = dim_a_m; cur_dim_b_n = dim_a_n; end
+            1: begin cur_dim_b_m = dim_b_m; cur_dim_b_n = dim_b_n; end
+            2: begin cur_dim_b_m = dim_c_m; cur_dim_b_n = dim_c_n; end
+            default: begin cur_dim_b_m = 0; cur_dim_b_n = 0; end
+        endcase
+    end
+
+    reg check_pass;
+    always @(*) begin
+        check_pass = 0;
+        case(alu_opcode)
+            3'b000, 3'b001: begin // ADD, SUB
+                 if (cur_dim_a_m == cur_dim_b_m && cur_dim_a_n == cur_dim_b_n && cur_dim_a_m != 0) check_pass = 1;
+            end
+            3'b010: begin // MUL
+                 if (cur_dim_a_n == cur_dim_b_m && cur_dim_a_m != 0 && cur_dim_b_n != 0) check_pass = 1;
+            end
+            3'b011, 3'b100: begin // SCA, TRA
+                 if (cur_dim_a_m != 0) check_pass = 1;
+            end
+            default: check_pass = 0;
+        endcase
+    end
+    
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             // Reset Logic
@@ -326,6 +369,12 @@ module top (
             reset_cnt <= 0;
             reset_timer <= 0;
             
+            // Defaults for Slots
+            sel_slot_a <= 0;
+            sel_slot_b <= 1;
+            
+            config_timer_val <= 4'd10; // Init to 10s
+            
         end else begin
             // Default Pulses
             input_dim_done <= 0;
@@ -340,10 +389,8 @@ module top (
             result_display_done <= 0;
             conv_start <= 0;
             tx_start <= 0; // UART TX Start Pulse
+            timer_start <= 0; // Ensure timer resets if not held
             
-            // Default Config Timer Val
-            if (rst_n == 0) config_timer_val <= 4'd10; // Init to 10s
-
             // Update Config Timer via Parser in IDLE or special mode?
             // Requirement: "系统运行过程中用户输入指定倒计时"
             // Let's assume user can input a single number in IDLE mode to set timer if not entering matrix?
@@ -405,6 +452,7 @@ module top (
                     if (in_count != 0) in_count <= 0; 
                     
                     if (parser_valid) begin
+                        $display("[TOP DEBUG] INPUT_DIM Parser Valid. Num: %d in_m: %d", parser_num, in_m);
                         if (parser_num >= 1 && parser_num <= 5) begin
                             if (in_m == 0) begin
                                 in_m <= parser_num[2:0]; // First number: M
@@ -415,6 +463,7 @@ module top (
                                     in_total <= in_m * parser_num[2:0];
                                     input_dim_done <= 1; // Pulse FSM
                                     in_count <= 0;
+                                    $display("[TOP DEBUG] Dim Done. M: %d N: %d Total: %d", in_m, parser_num, in_m * parser_num[2:0]);
                                 end else begin
                                     check_invalid <= 1; 
                                     error_led_timer <= 26'd50_000_000;
@@ -433,15 +482,10 @@ module top (
                 // -----------------------
                 2: begin // INPUT_DATA
                     if (parser_valid) begin
-                        if (parser_num <= 9) begin
-                            in_count <= in_count + 1;
-                            if (in_count + 1 == in_total) begin
-                                input_data_done <= 1;
-                            end
-                        end else begin
-                            // Invalid Element (>9)
-                            check_invalid <= 1;
-                            error_led_timer <= 26'd50_000_000; // Blink LED
+                        // Accept any number
+                        in_count <= in_count + 1;
+                        if (in_count + 1 == in_total) begin
+                            input_data_done <= 1;
                         end
                     end
                 end
@@ -495,6 +539,11 @@ module top (
                 // -----------------------
                 8: begin // CALC_SELECT_MAT
                     if (alu_opcode == 3'b011) alu_scalar <= {8'b0, sw_pin}; 
+                    else begin
+                        // Allow selecting slots
+                        sel_slot_a <= sw_pin[1:0];
+                        sel_slot_b <= sw_pin[3:2];
+                    end
                     if (btn_c_re) calc_mat_conf <= 1;
                 end
                 
@@ -502,7 +551,11 @@ module top (
                 // STATE: CALC CHECK
                 // -----------------------
                 9: begin // CALC_CHECK
-                    check_valid <= 1; 
+                    if (check_pass) check_valid <= 1;
+                    else begin
+                        check_invalid <= 1;
+                        // Timer start will be handled in CALC_ERROR
+                    end
                 end
                 
                 // -----------------------
@@ -529,8 +582,12 @@ module top (
                 12: begin // CALC_ERROR
                     timer_start <= 1;
                     // Allow user to change selection and confirm during error
-                    // Same logic as CALC_SELECT_MAT
                     if (alu_opcode == 3'b011) alu_scalar <= {8'b0, sw_pin}; 
+                    else begin
+                         sel_slot_a <= sw_pin[1:0];
+                         sel_slot_b <= sw_pin[3:2];
+                    end
+                    
                     if (btn_c_re) calc_mat_conf <= 1; // This triggers transition to CHECK in FSM
                 end
                 
