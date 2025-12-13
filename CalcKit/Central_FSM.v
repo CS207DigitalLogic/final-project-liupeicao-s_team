@@ -52,6 +52,9 @@ module Central_FSM (
     localparam STATE_CALC_EXEC      = 4'd10; // 计算执行
     localparam STATE_CALC_DONE      = 4'd11; // 计算完成
     localparam STATE_CALC_ERROR     = 4'd12; // 错误倒计时
+    
+    // 配置模式
+    localparam STATE_CONFIG         = 4'd13; // 配置参数
 
     // 内部状态寄存器
     reg [3:0] next_state;
@@ -80,6 +83,7 @@ module Central_FSM (
                         3'b100: next_state = STATE_BONUS_RUN;
                         3'b010: next_state = STATE_DISPLAY_WAIT;
                         3'b011: next_state = STATE_CALC_SELECT_OP;
+                        3'b101: next_state = STATE_CONFIG;
                         default: next_state = STATE_IDLE;
                     endcase
                 end
@@ -158,6 +162,12 @@ module Central_FSM (
                 // 我们可以在 ERROR 状态下复用 calc_mat_conf 信号作为跳转条件。
                 else if (calc_mat_conf)
                     next_state = STATE_CALC_CHECK;
+            end
+
+            // 7. 配置模式
+            STATE_CONFIG: begin
+                if (btn_c) 
+                    next_state = STATE_IDLE;
             end
 
             default: next_state = STATE_IDLE;

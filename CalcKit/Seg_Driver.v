@@ -69,6 +69,7 @@ module Seg_Driver (
     localparam STATE_CALC_EXEC      = 4'd10;
     localparam STATE_CALC_DONE      = 4'd11;
     localparam STATE_CALC_ERROR     = 4'd12;
+    localparam STATE_CONFIG_MODE    = 4'd13;
 
     // =========================================================================
     // 2. Display Content Logic
@@ -94,6 +95,22 @@ module Seg_Driver (
                 disp_val[1] = CHAR_BLANK;
                 disp_val[0] = get_hex_char(time_left);
             end
+        end
+        // Priority 2: IDLE State
+        else if (current_state == STATE_IDLE) begin
+            // "IDLE"
+            // Display on Left or Right? Usually Left or spread.
+            // Let's put "IDLE" on 7,6,5,4 (Left Group)
+            disp_val[7] = 8'h30; // I (using existing definition or 06)
+            disp_val[6] = CHAR_d;
+            disp_val[5] = CHAR_L;
+            disp_val[4] = CHAR_E;
+        end
+        // Priority 3: Config State
+        else if (current_state == STATE_CONFIG_MODE) begin
+            // "ConF"
+            disp_val[7] = CHAR_C; disp_val[6] = CHAR_o; disp_val[5] = CHAR_n; disp_val[4] = CHAR_F;
+            // Maybe show something on right?
         end
         else begin
             case (sw_mode)

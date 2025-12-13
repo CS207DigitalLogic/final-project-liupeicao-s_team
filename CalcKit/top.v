@@ -403,14 +403,6 @@ module top (
             // 100: Bonus
             // Let's use SW[7:5] = 101 (5) for Config Mode
             
-            if (current_state == 0 && sw_pin[7:5] == 3'b101) begin
-                if (parser_valid) begin
-                    if (parser_num >= 5 && parser_num <= 15) begin
-                        config_timer_val <= parser_num[3:0];
-                    end
-                end
-            end
-
             // Decrement Error Timer
             if (error_led_timer > 0) error_led_timer <= error_led_timer - 1;
 
@@ -589,6 +581,17 @@ module top (
                     end
                     
                     if (btn_c_re) calc_mat_conf <= 1; // This triggers transition to CHECK in FSM
+                end
+
+                // -----------------------
+                // STATE: CONFIG
+                // -----------------------
+                13: begin // CONFIG
+                    if (parser_valid) begin
+                        if (parser_num >= 5 && parser_num <= 15) begin
+                            config_timer_val <= parser_num[3:0];
+                        end
+                    end
                 end
                 
             endcase
