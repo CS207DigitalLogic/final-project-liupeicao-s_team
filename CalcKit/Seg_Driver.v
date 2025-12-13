@@ -82,21 +82,23 @@ module Seg_Driver (
         disp_val[3] = CHAR_BLANK; disp_val[2] = CHAR_BLANK; disp_val[1] = CHAR_BLANK; disp_val[0] = CHAR_BLANK;
         
         // Priority 1: Error State (Highest Priority)
-        if (current_state == STATE_CALC_ERROR) begin
-            // "Err XX"
-            disp_val[7] = CHAR_E;
-            disp_val[6] = CHAR_r;
-            disp_val[5] = CHAR_r;
-            // Countdown at 1,0
-            if (time_left >= 10) begin
-                disp_val[1] = CHAR_1;
-                disp_val[0] = get_hex_char(time_left - 10);
-            end else begin
-                disp_val[1] = CHAR_BLANK;
-                disp_val[0] = get_hex_char(time_left);
-            end
-        end
-        // Priority 2: IDLE State
+    // Supports explicit Error State (12) OR implicit Error Flag via Time Left (if needed)
+    // Current design: top.v sets state to CALC_ERROR when error occurs.
+    if (current_state == STATE_CALC_ERROR) begin
+        // "Err "
+        disp_val[7] = CHAR_E;
+        disp_val[6] = CHAR_r;
+        disp_val[5] = CHAR_r;
+        disp_val[4] = CHAR_BLANK;
+        
+        // No Countdown, just Err. Blank the rest or show something else?
+        // User requirement: "此阶段不显示倒计时数字，仅显示固定的 Err 字符"
+        disp_val[3] = CHAR_BLANK;
+        disp_val[2] = CHAR_BLANK;
+        disp_val[1] = CHAR_BLANK;
+        disp_val[0] = CHAR_BLANK;
+    end
+    // Priority 2: IDLE State
         else if (current_state == STATE_IDLE) begin
             // "IDLE"
             // Display on Left or Right? Usually Left or spread.
